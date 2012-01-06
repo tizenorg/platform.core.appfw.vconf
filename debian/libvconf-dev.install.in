@@ -1,0 +1,4 @@
+@PREFIX@/include/vconf/vconf.h
+@PREFIX@/lib/*.so
+@PREFIX@/lib/pkgconfig/*.pc
+

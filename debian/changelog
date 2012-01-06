@@ -1,0 +1,15 @@
+vconf (0.2.21-5) unstable; urgency=low
+
+  * change setting usb enum value
+  * Git: pkgs/l/libslp-setting
+  * Tag: vconf_0.2.21-5
+
+ -- Hyungdeuk Kim <hd3.kim@samsung.com>  Wed, 21 Dec 2011 10:56:20 +0900
+
+vconf (0.2.21-4) unstable; urgency=low
+
+  * Initial Release.
+  * Git: pkgs/l/libslp-setting
+  * Tag: vconf_0.2.21-4
+
+ -- Hyungdeuk Kim <hd3.kim@samsung.com>  Tue, 07 Dec 2011 13:56:20 +0900

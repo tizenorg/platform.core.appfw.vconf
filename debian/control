@@ -1,0 +1,64 @@
+Source: vconf
+Section: libs
+Priority: optional
+Maintainer: Hakjoo Ko <hakjoo.ko@samsung.com>, Hyungdeuk Kim <hd3.kim@samsung.com>, Youmin Ha <youmin.ha@samsung.com>, Myungjune Park(Maintainer of setting app) <mj2004.park@samsung.com>
+Uploaders: Hyungdeuk Kim <hd3.kim@samsung.com>, Youmin Ha <youmin.ha@samsung.com>
+Build-Depends: debhelper (>= 5), libelektra-dev, libglib2.0-dev, libgconf-dbus-dev, dlog-dev
+Standards-Version: 3.7.2
+
+Package: libslp-setting-keys-dev
+Section: libs
+Architecture: any
+Depends: libvconf-keys-dev
+Description: metapackage for libvconf-keys-dev)
+XB-Public-Package: no
+
+Package: libslp-setting-dev
+Section: libs
+Architecture: any
+Depends: libvconf-dev
+Description: metapackage for libvconf-dev
+XB-Generate-Docs: yes 
+
+Package: libslp-setting-0
+Section: libs
+Architecture: any
+Depends: libvconf-0
+Description: metapackage for libvconf-0
+
+Package: libslp-setting-dbg
+Section: debug
+Architecture: any
+Depends: libvconf-dbg
+Description: metapackage for libvconf-dbg
+
+
+Package: libvconf-keys-dev
+Section: libs
+Architecture: any
+Depends: libvconf-0 (= ${Source-Version})
+Description: vconf key header file (development)
+XB-Public-Package: no
+
+Package: libvconf-dev
+Section: libs
+Architecture: any
+Depends: libvconf-0 (= ${Source-Version}), libglib2.0-dev, libgconf-dbus-dev, libvconf-keys-dev
+Description: vconf library (development)
+XB-Generate-Docs: yes 
+
+Package: libvconf-0
+Section: libs
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, sqlfs-bin
+Description: vconf library (shared object)
+
+Package: libvconf-dbg
+Section: debug
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libvconf-0 (= ${Source-Version})
+Description: vconf library (unstripped)
+
+
+
+
