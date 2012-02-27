@@ -316,6 +316,23 @@ enum {
 	VCONFKEY_TELEPHONY_FACTORY_KSTRINGB_ON = 0x01
 };
 
+/* manage telephony call state */
+#define VCONFKEY_TELEPHONY_CALL1_STATE VCONFKEY_TELEPHONY_PREFIX"/call1_state"
+#define VCONFKEY_TELEPHONY_CALL2_STATE VCONFKEY_TELEPHONY_PREFIX"/call2_state"
+#define VCONFKEY_TELEPHONY_CALL3_STATE VCONFKEY_TELEPHONY_PREFIX"/call3_state"
+#define VCONFKEY_TELEPHONY_CALL4_STATE VCONFKEY_TELEPHONY_PREFIX"/call4_state"
+#define VCONFKEY_TELEPHONY_CALL5_STATE VCONFKEY_TELEPHONY_PREFIX"/call5_state"
+#define VCONFKEY_TELEPHONY_CALL6_STATE VCONFKEY_TELEPHONY_PREFIX"/call6_state"
+enum {
+        VCONFKEY_TELEPHONY_CALL_STATE_IDLE = 0x00,
+        VCONFKEY_TELEPHONY_CALL_STATE_ACTIVE,
+        VCONFKEY_TELEPHONY_CALL_STATE_HELD,
+        VCONFKEY_TELEPHONY_CALL_STATE_DIALING,
+        VCONFKEY_TELEPHONY_CALL_STATE_ALERT,
+        VCONFKEY_TELEPHONY_CALL_STATE_INCOMING,
+        VCONFKEY_TELEPHONY_CALL_STATE_WAITING
+};
+
 /**
  * @}
  */
@@ -2144,16 +2161,23 @@ enum {
  * @ingroup vconf_key
  * @addtogroup vconf_key_NFC
  * @{
- * @brief Maintainer : wonkyu.kwon@samsung.com
+ * @brief Maintainer : wonkyu.kwon@samsung.com, sc.sohn@samsung.com
  */
-
 #define  VCONFKEY_NFC_STATE "db/nfc/enable"  /* status of NFC On/Off */
-
 enum
 {
     VCONFKEY_NFC_STATE_OFF = 0x00,
     VCONFKEY_NFC_STATE_ON,
     VCONFKEY_NFC_STATE_MAX
+};
+
+/* NFC Feature On/Off status used by setting & app using share via*/
+#define  VCONFKEY_NFC_FEATURE "db/nfc/feature"
+enum
+{
+    VCONFKEY_NFC_FEATURE_OFF = 0x00,
+    VCONFKEY_NFC_FEATURE_ON,
+    VCONFKEY_NFC_FEATURE_MAX
 };
 
 /**
