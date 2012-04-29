@@ -1896,15 +1896,3 @@ API int vconf_ignore_key_changed(const char *in_key, vconf_callback_fn cb)
 	return 0;
 }
 
-API mode_t vconf_set_permission(mode_t mode)
-{
-	/* TODO: implement! */
-	return mode;
-}
-
-API int vconf_set_key_permission(const char *in_key, const mode_t mode)
-{
-	/* TODO: implement! */
-	return 0;
-}
-

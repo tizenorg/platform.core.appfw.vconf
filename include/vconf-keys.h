@@ -812,6 +812,13 @@ enum {
 
 #define VCONFKEY_SYSMAN_CRADLE_STATUS                  "memory/Device/Cradle/Status"
 
+#define VCONFKEY_SYSMAN_SLIDING_KEYBOARD                "memory/Device/Sliding_keyboard"
+enum {
+        VCONFKEY_SYSMAN_SLIDING_KEYBOARD_NOT_SUPPORTED = -1,
+        VCONFKEY_SYSMAN_SLIDING_KEYBOARD_NOT_AVAILABE = 0,
+        VCONFKEY_SYSMAN_SLIDING_KEYBOAED_AVAILABLE
+};
+
 /* requested by dg0402.jang for USB-Host USB Storage Mount. 2011-07-21 */
 #define VCONFKEY_SYSMAN_ADDED_USB_STORAGE              "memory/Device/usbhost/added_storage"
 #define VCONFKEY_SYSMAN_REMOVED_USB_STORAGE            "memory/Device/usbhost/removed_storage"
@@ -1530,8 +1537,8 @@ enum {
 
 #define VCONFKEY_WIFI_STRENGTH "memory/wifi/strength"
 enum {
-	VCONFKEY_WIFI_STRINGTH_MIN = 0,
-	VCONFKEY_WIFI_STRINGTH_MAX = 4
+	VCONFKEY_WIFI_STRENGTH_MIN = 0,
+	VCONFKEY_WIFI_STRENGTH_MAX = 4
 };
 
 #define VCONFKEY_WIFI_QS_EXIT "memory/wifi/wifi_qs_exit"
@@ -1550,7 +1557,7 @@ enum {
 /* Current connected ap's name : string
  * Added by Misun Kim <ms0123.kim@samsung.com>
  */
-#define VCONFKEY_WIFI_CONNECTED_AP_NAME "db/wifi/connected_ap_name"
+#define VCONFKEY_WIFI_CONNECTED_AP_NAME "memory/wifi/connected_ap_name"
 
 /* Current state of wifi UG */
 #define VCONFKEY_WIFI_UG_RUN_STATE "memory/wifi/ug_run_state"
@@ -1561,6 +1568,22 @@ enum {
 	VCONFKEY_WIFI_UG_RUN_STATE_OFF,
 	VCONFKEY_WIFI_UG_RUN_STATE_MAX
 };
+
+/*
+ * SLP BADA REQUIREMENT - Wi-Fi MAC address
+ * Maintainer : s.seo
+ */
+#define VCONFKEY_WIFI_BSSID_ADDRESS "db/wifi/bssid_address"
+
+#define VCONFKEY_WIFI_DIRECT_STATE    "memory/wifi_direct/state"
+enum {
+ VCONFKEY_WIFI_DIRECT_DEACTIVATED  = 0,
+ VCONFKEY_WIFI_DIRECT_ACTIVATED,
+ VCONFKEY_WIFI_DIRECT_DISCOVERING,
+ VCONFKEY_WIFI_DIRECT_CONNECTED,
+ VCONFKEY_WIFI_DIRECT_GROUP_OWNER
+};
+
 
 /**
  * @}

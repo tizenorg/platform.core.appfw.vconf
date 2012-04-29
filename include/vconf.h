@@ -859,37 +859,6 @@ int main(int argc, char **argv)
  */
 	int vconf_set_bytes(const char *in_key, const void *binval, int size);
 
-#include <sys/stat.h>
-#include <sys/types.h>
-
-/**
- * TO BE DEPRECATED \n
- * This function set the key permission of given mode value
- * Once the permission is set, all keys to be set is affected.
- * @param[in]	mode file permission value to be set (mode_t value)
- * @return previous file permission value (mode_t value)
- * @pre None
- * @post None
- * @remarks None
- * @see None
- */
-	mode_t vconf_set_permission(mode_t mode);
-
-/**
- * This function set permission of given key. \n
- *
- * Default key permission is 0644.
- *
- * @param[in]	in_key	key to change permission
- * @param[in]	mode	mode to change
- * @return	0 on success, -1 on error
- * @pre None
- * @post None
- * @remarks None
- * @see None
- */
-	int vconf_set_key_permission(const char *key, const mode_t mode);
-
 #ifdef __cplusplus
 }
 #endif

@@ -1,11 +1,11 @@
 Name:       vconf
 Summary:    Configuration system library
-Version:    0.2.21
+Version:    0.2.23
 Release:    1
 Group:      System/Libraries
-License:    Apache-2.0
+License:    Apache License, Version 2.0
 Source0:    %{name}-%{version}.tar.gz
-Requires(post): /sbin/ldconfig, /bin/ln
+Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 BuildRequires:  cmake
 BuildRequires:  pkgconfig(elektra)
@@ -15,8 +15,6 @@ BuildRequires:  pkgconfig(dlog)
 		
 %description 
 Configuration system library
-
-
 
 %package devel
 Summary:    vconf (devel)
@@ -38,46 +36,45 @@ Requires:   vconf = %{version}-%{release}
 %description keys-devel
 Vconf key management header files
 
-
 %prep
 %setup -q -n %{name}-%{version}
-
 
 %build
 cmake . -DCMAKE_INSTALL_PREFIX=%{_prefix}
 
-
 make %{?jobs:-j%jobs}
 
 %install
+rm -rf %{buildroot}
 %make_install
 
 mkdir -p %{buildroot}/opt/var/gconf
-mkdir -p %{buildroot}/opt/var/kdb/db
-chmod 777 %{buildroot}/opt/var/kdb/db
+mkdir -p %{buildroot}/etc/rc.d/rc3.d
+mkdir -p %{buildroot}/etc/rc.d/rc4.d
+ln -sf /etc/rc.d/init.d/vconf-init %{buildroot}/etc/rc.d/rc3.d/S12vconf-init
+ln -sf /etc/rc.d/init.d/vconf-init %{buildroot}/etc/rc.d/rc4.d/S12vconf-init
 
-%post 
-/sbin/ldconfig
-
-ln -sf /etc/rc.d/init.d/vconf-init /etc/rc.d/rc3.d/S12vconf-init
-ln -sf /etc/rc.d/init.d/vconf-init /etc/rc.d/rc4.d/S12vconf-init
-
+%post -p /sbin/ldconfig
 
 %postun -p /sbin/ldconfig
 
 %files
-%{_sysconfdir}/rc.d/init.d/vconf-init
+%defattr(-,root,root,-)
+%attr(755,root,root) %{_sysconfdir}/rc.d/init.d/vconf-init
+%{_sysconfdir}/rc.d/rc3.d/S12vconf-init
+%{_sysconfdir}/rc.d/rc4.d/S12vconf-init
 %{_bindir}/vconftool
-%config(missingok) %attr(644,root,root) /opt/var/kdb/kdb_first_boot
+%attr(644, root, root) /opt/var/kdb/kdb_first_boot
 %{_libdir}/*.so.*
-%dir %attr(777,root,root) /opt/var/gconf
-%dir %attr(777,root,root) /opt/var/kdb/db
+%attr(777,root,root) /opt/var/gconf
 
 %files devel
+%defattr(-,root,root,-)
 %{_includedir}/vconf/vconf.h
 %{_libdir}/pkgconfig/*.pc
 %{_libdir}/*.so
 
 %files keys-devel
+%defattr(-,root,root,-)
 %{_includedir}/vconf/vconf-keys.h
 

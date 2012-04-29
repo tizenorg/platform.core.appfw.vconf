@@ -255,11 +255,9 @@ int main(int argc, char **argv)
 			if (guid) {
 				/* TODO; digit check */
 				group_id = atoi(guid);
-				vconf_set_permission(SHARED_PERM);
 			}
 			if (uid) {
 				user_id = atoi(uid);
-				vconf_set_permission(USER_PERM);
 			}
 
 		}

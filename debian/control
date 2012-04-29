@@ -1,9 +1,9 @@
 Source: vconf
 Section: libs
 Priority: optional
-Maintainer: Hakjoo Ko <hakjoo.ko@samsung.com>, Hyungdeuk Kim <hd3.kim@samsung.com>, Youmin Ha <youmin.ha@samsung.com>, Myungjune Park(Maintainer of setting app) <mj2004.park@samsung.com>
-Uploaders: Hyungdeuk Kim <hd3.kim@samsung.com>, Youmin Ha <youmin.ha@samsung.com>
-Build-Depends: debhelper (>= 5), libelektra-dev, libglib2.0-dev, libgconf-dbus-dev, dlog-dev
+Maintainer: Hakjoo Ko <hakjoo.ko@samsung.com>, Hyungdeuk Kim <hd3.kim@samsung.com>
+Uploaders: Hakjoo Ko <hakjoo.ko@samsung.com>, Hyungdeuk Kim <hd3.kim@samsung.com>
+Build-Depends: debhelper (>= 5), libglib2.0-dev, dlog-dev, libelektra-dev
 Standards-Version: 3.7.2
 
 Package: libslp-setting-keys-dev
@@ -43,7 +43,7 @@ XB-Public-Package: no
 Package: libvconf-dev
 Section: libs
 Architecture: any
-Depends: libvconf-0 (= ${Source-Version}), libglib2.0-dev, libgconf-dbus-dev, libvconf-keys-dev
+Depends: libvconf-0 (= ${Source-Version}), libglib2.0-dev, dlog-dev, libvconf-keys-dev
 Description: vconf library (development)
 XB-Generate-Docs: yes 
 
@@ -58,7 +58,3 @@ Section: debug
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, libvconf-0 (= ${Source-Version})
 Description: vconf library (unstripped)
-
-
-
-
