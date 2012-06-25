@@ -5,15 +5,16 @@ Release:    1
 Group:      System/Libraries
 License:    Apache License, Version 2.0
 Source0:    %{name}-%{version}.tar.gz
-Source1001: packaging/vconf.manifest 
-Requires(post): /sbin/ldconfig
-Requires(postun): /sbin/ldconfig
+Source1:    vconf-setup.service
+Source1001: packaging/vconf.manifest
+Requires(post): /sbin/ldconfig, systemd
+Requires(postun): /sbin/ldconfig, systemd
 BuildRequires:  cmake
 BuildRequires:  pkgconfig(elektra)
 BuildRequires:  pkgconfig(glib-2.0)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(dlog)
-		
+
 %description 
 Configuration system library
 
@@ -51,35 +52,49 @@ rm -rf %{buildroot}
 %make_install
 
 mkdir -p %{buildroot}/opt/var/gconf
+mkdir -p %{buildroot}/opt/var/kdb/db
+mkdir -p %{buildroot}%{_libdir}/systemd/system/basic.target.wants
+install -m0644 %SOURCE1 %{buildroot}%{_libdir}/systemd/system/
+ln -sf ../vconf-setup.service %{buildroot}%{_libdir}/systemd/system/basic.target.wants/
+
 mkdir -p %{buildroot}/etc/rc.d/rc3.d
 mkdir -p %{buildroot}/etc/rc.d/rc4.d
 ln -sf /etc/rc.d/init.d/vconf-init %{buildroot}/etc/rc.d/rc3.d/S12vconf-init
 ln -sf /etc/rc.d/init.d/vconf-init %{buildroot}/etc/rc.d/rc4.d/S12vconf-init
 
-%post -p /sbin/ldconfig
 
-%postun -p /sbin/ldconfig
+%post
+/sbin/ldconfig
+systemctl daemon-reload
+
+%postun
+/sbin/ldconfig
+systemctl daemon-reload
+
 
 %files
-%manifest vconf.manifest
 %defattr(-,root,root,-)
+%manifest vconf.manifest
 %attr(755,root,root) %{_sysconfdir}/rc.d/init.d/vconf-init
 %{_sysconfdir}/rc.d/rc3.d/S12vconf-init
 %{_sysconfdir}/rc.d/rc4.d/S12vconf-init
 %{_bindir}/vconftool
-%attr(644, root, root) /opt/var/kdb/kdb_first_boot
+%config(missingok) %attr(644,root,root) /opt/var/kdb/kdb_first_boot
 %{_libdir}/*.so.*
-%attr(777,root,root) /opt/var/gconf
+%dir %attr(777,root,root) /opt/var/gconf
+%dir %attr(777,root,root) /opt/var/kdb/db
+%{_libdir}/systemd/system/basic.target.wants/vconf-setup.service
+%{_libdir}/systemd/system/vconf-setup.service
 
 %files devel
-%manifest vconf.manifest
 %defattr(-,root,root,-)
+%manifest vconf.manifest
 %{_includedir}/vconf/vconf.h
 %{_libdir}/pkgconfig/*.pc
 %{_libdir}/*.so
 
 %files keys-devel
-%manifest vconf.manifest
 %defattr(-,root,root,-)
+%manifest vconf.manifest
 %{_includedir}/vconf/vconf-keys.h
 

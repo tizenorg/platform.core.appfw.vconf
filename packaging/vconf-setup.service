@@ -1,0 +1,17 @@
+
+[Unit]
+Description=Initialize the VConf storage
+DefaultDependencies=no
+After=opt-var-kdb-db.mount
+Requires=opt-var-kdb-db.mount
+Before=basic.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/mkdir -p /var/run/memory
+ExecStartPre=/bin/chmod ugo+rwx /var/run/memory
+ExecStart=/bin/cp -pr /opt/var/kdb/memory_init/memory /var/run/
+
+[Install]
+WantedBy=basic.target
+
