@@ -1,0 +1,23 @@
+* Mon Jul 02 2012 Patrick McCarty <patrick.mccarty@linux.intel.com> 6f27015
+- Reference the new libsqlfs service file in vconf-setup.service
+
+* Mon Jun 25 2012 Chris E Ferron <chris.e.ferron@linux.intel.com> 6669fef
+- added systemd
+
+* Tue May 29 2012 Ryan Ware <ryan.r.ware@intel.com> ca66733
+- Add default Smack manifest for vconf.spec
+
+* Sun Apr 29 2012 Kim Kibum <kb0929.kim@samsung.com> fceb70e
+- upload tizen1.0 source
+
+* Tue Mar 13 2012 Yan Yin <yan.yin@intel.com> bdf3a2c
+- update for beta universally
+
+* Sun Feb 26 2012 Kibum Kim <kb0929.kim@samsung.com> 3df672c
+- tizen beta release
+
+* Fri Jan 06 2012 Kibum Kim <kb0929.kim@samsung.com> bc59ac2
+- Git init
+[ Eunkyoung Kim ]
+- Initial empty repository
+

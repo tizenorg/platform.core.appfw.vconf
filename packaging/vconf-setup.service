@@ -2,8 +2,8 @@
 [Unit]
 Description=Initialize the VConf storage
 DefaultDependencies=no
-After=opt-var-kdb-db.mount
-Requires=opt-var-kdb-db.mount
+After=opt-var-kdb-db-libsqlfs.service
+Requires=opt-var-kdb-db-libsqlfs.service
 Before=basic.target
 
 [Service]
