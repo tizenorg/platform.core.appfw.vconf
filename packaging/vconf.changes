@@ -1,3 +1,6 @@
+* Tue Jul 03 2012 Chris E Ferron <chris.e.ferron@linux.intel.com>
+- added vconf-setup.conf and removed mkdir and chmod from service unit
+
 * Mon Jul 02 2012 Patrick McCarty <patrick.mccarty@linux.intel.com> 6f27015
 - Reference the new libsqlfs service file in vconf-setup.service
 

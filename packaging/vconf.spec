@@ -6,6 +6,7 @@ Group:      System/Libraries
 License:    Apache License, Version 2.0
 Source0:    %{name}-%{version}.tar.gz
 Source1:    vconf-setup.service
+Source2:    vconf-setup.conf
 Source1001: packaging/vconf.manifest
 Requires(post): /sbin/ldconfig, systemd
 Requires(postun): /sbin/ldconfig, systemd
@@ -54,7 +55,9 @@ rm -rf %{buildroot}
 mkdir -p %{buildroot}/opt/var/gconf
 mkdir -p %{buildroot}/opt/var/kdb/db
 mkdir -p %{buildroot}%{_libdir}/systemd/system/basic.target.wants
+mkdir -p %{buildroot}%{_libdir}/tmpfiles.d
 install -m0644 %SOURCE1 %{buildroot}%{_libdir}/systemd/system/
+install -m0644 %SOURCE2 %{buildroot}%{_libdir}/tmpfiles.d/
 ln -sf ../vconf-setup.service %{buildroot}%{_libdir}/systemd/system/basic.target.wants/
 
 mkdir -p %{buildroot}/etc/rc.d/rc3.d
@@ -85,6 +88,7 @@ systemctl daemon-reload
 %dir %attr(777,root,root) /opt/var/kdb/db
 %{_libdir}/systemd/system/basic.target.wants/vconf-setup.service
 %{_libdir}/systemd/system/vconf-setup.service
+%{_libdir}/tmpfiles.d/vconf-setup.conf
 
 %files devel
 %defattr(-,root,root,-)
