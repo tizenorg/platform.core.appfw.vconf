@@ -19,25 +19,35 @@
  *
  */
 
-#define _GNU_SOURCE
-
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
 #include "vconf-internals.h"
-
-extern __thread KDB *g_kdb_handle;
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/xattr.h>
+#include <ctype.h>
 
 #ifndef API
 #define API __attribute__ ((visibility("default")))
 #endif
 
-#define MAX_ERROR_LOOP_CNT 3
-#define ERROR_LOOP_SLEEP_TIME 50000
+#define VCONF_ERROR_RETRY_CNT 10
+#define VCONF_ERROR_RETRY_SLEEP_UTIME 5000
 
-/* #define ADDR_TRANS */
+int IN_SBOX=0;
+
+#define VCONF_MOUNT_PATH "/opt/var/kdb/db"
+#define VCONF_MOUNT_PATH_CHECK \
+do{\
+	if(!IN_SBOX) \
+      IN_SBOX = access("/opt/var/kdb/kdb_first_boot", F_OK) + 2; \
+   	if(2==IN_SBOX) return 0;\
+}while(0)
+
+__thread int is_transaction;
 
 #ifdef VCONF_TIMECHECK
 double correction, startT;
@@ -68,152 +78,102 @@ int init_time(void)
 }
 #endif
 
-static int keynode_set_keyname(keynode_t *keynode, const char *keyname)
+int _vconf_keynode_set_keyname(keynode_t *keynode, const char *keyname)
 {
-	if (keynode->keyname)
-		free(keynode->keyname);
+	if (keynode->keyname) free(keynode->keyname);
 	keynode->keyname = strndup(keyname, BUF_LEN);
-	retvm_if(keynode->keyname == NULL, -1, "strndup Fails");
-	return 0;
+	retvm_if(keynode->keyname == NULL, VCONF_ERROR, "strndup Fails");
+	return VCONF_OK;
 }
 
-static inline void keynode_set_dir(keynode_t *keynode)
+static inline void _vconf_keynode_set_dir(keynode_t *keynode)
 {
 	keynode->type = VCONF_TYPE_DIR;
 }
 
-static inline void keynode_set_value_int(keynode_t *keynode, const int value)
+static inline void _vconf_keynode_set_value_int(keynode_t *keynode, const int value)
 {
 	keynode->type = VCONF_TYPE_INT;
 	keynode->value.i = value;
 }
 
-static inline void keynode_set_value_bool(keynode_t *keynode, const int value)
+static inline void _vconf_keynode_set_value_bool(keynode_t *keynode, const int value)
 {
 	keynode->type = VCONF_TYPE_BOOL;
 	keynode->value.b = !!value;
 }
 
-static inline void keynode_set_value_dbl(keynode_t *keynode, const double value)
+static inline void _vconf_keynode_set_value_dbl(keynode_t *keynode, const double value)
 {
 	keynode->type = VCONF_TYPE_DOUBLE;
 	keynode->value.d = value;
 }
 
-static inline void keynode_set_value_str(keynode_t *keynode, const char *value)
+static inline void _vconf_keynode_set_value_str(keynode_t *keynode, const char *value)
 {
 	keynode->type = VCONF_TYPE_STRING;
-	keynode->value.s = strndup(value, BUF_LEN);
+	keynode->value.s = strdup(value);
 }
 
-static inline keynode_t *keynode_next(keynode_t *keynode)
+inline void _vconf_keynode_set_null(keynode_t *keynode)
+{
+	keynode->type = VCONF_TYPE_NONE;
+	//keynode->value.d = NULL;
+}
+
+static inline keynode_t *_vconf_keynode_next(keynode_t *keynode)
 {
 	return keynode->next;
 }
 
-static inline void keynode_free(keynode_t *keynode)
+inline keynode_t *_vconf_keynode_new(void)
 {
-	if (keynode->keyname)
-		free(keynode->keyname);
-	if (keynode->type == VCONF_TYPE_STRING && keynode->value.s)
-		free(keynode->value.s);
-	free(keynode);
+	keynode_t *keynode;
+	keynode = calloc(1, sizeof(keynode_t));
+
+	return keynode;
 }
 
-static inline keynode_t *keylist_headnode(keylist_t *keylist)
+inline void _vconf_keynode_free(keynode_t *keynode)
+{
+	if(keynode) {
+		if (keynode->keyname)
+			free(keynode->keyname);
+		if (keynode->type == VCONF_TYPE_STRING && keynode->value.s)
+			free(keynode->value.s);
+		free(keynode);
+	}
+}
+
+static inline keynode_t *_vconf_keylist_headnode(keylist_t *keylist)
 {
 	return keylist->head;
 }
 
-static keynode_t *keylist_lookup(keylist_t *keylist, const char *keyname,
+static keynode_t *_vconf_keylist_lookup(keylist_t *keylist, const char *keyname,
 				 keynode_t **before_keynode)
 {
 	keynode_t *found_node, *temp_node = NULL;
 
-	found_node = keylist->head;
+	found_node = _vconf_keylist_headnode(keylist);
+
 	while (found_node) {
-		if (strlen(found_node->keyname) == strlen(keyname)) {
-			if (!strncmp
-			    (keyname, found_node->keyname, strlen(keyname))) {
-				if (before_keynode)
-					*before_keynode = temp_node;
-				return found_node;
-			}
+		if(found_node->keyname == NULL) {
+			ERR("key node has null keyname");
+			return NULL;
 		}
+
+		if (!strncmp(keyname, found_node->keyname, strlen(keyname))) {
+			if (before_keynode) {
+					*before_keynode = temp_node;
+			}
+			return found_node;
+		}
+
 		temp_node = found_node;
-		found_node = keynode_next(found_node);
+		found_node = _vconf_keynode_next(found_node);
 	}
 	return NULL;
-}
-
-static int trans_keyname(const char *keyname, char **trans_name)
-{
-#ifdef ADDR_TRANS
-	char *_key;
-#endif
-	if (0 ==
-	    strncmp(keyname, BACKEND_DB_PREFIX,
-		    sizeof(BACKEND_DB_PREFIX) - 1)) {
-		*trans_name = (char *)keyname;
-		return VCONF_BACKEND_DB;
-	} else if (0 ==
-		   strncmp(keyname, BACKEND_FILE_PREFIX,
-			   sizeof(BACKEND_FILE_PREFIX) - 1)) {
-		*trans_name = (char *)keyname;
-		return VCONF_BACKEND_FILE;
-	} else if (0 ==
-		   strncmp(keyname, BACKEND_MEMORY_PREFIX,
-			   sizeof(BACKEND_MEMORY_PREFIX) - 1)) {
-		*trans_name = (char *)keyname;
-		return VCONF_BACKEND_MEMORY;
-#ifdef ADDR_TRANS
-	} else if (0 ==
-		   strncmp(keyname, BACKEND_USER_PREFIX,
-			   sizeof(BACKEND_USER_PREFIX) - 1)) {
-		/*becasue string has additional character('\0') */
-		_key = malloc(strlen(keyname));
-		strcpy(_key, keyname + 2);
-		memcpy(_key, "db", 2);
-		*trans_name = _key;
-		return VCONF_BACKEND_DB;
-	} else if (0 ==
-		   strncmp(keyname, BACKEND_SYSTEM_PREFIX,
-			   sizeof(BACKEND_SYSTEM_PREFIX) - 1)) {
-		_key = malloc(strlen(keyname));
-		strcpy(_key, keyname + 2);
-		memcpy(_key, "file", 4);
-		*trans_name = _key;
-		return VCONF_BACKEND_FILE;
-#endif
-	} else {
-		ERR("Invalid argument: wrong prefix of key(%s)", keyname);
-		return VCONF_BACKEND_NULL;
-	}
-}
-
-static int check_connetion(int backend, void **gconf_handle)
-{
-	if (backend >= VCONF_BACKEND_DB) {
-		KDB_OPEN_HANDLE;
-		retvm_if(g_kdb_handle == NULL, -1, "kdbOpen() failed");
-	}
-	return 0;
-}
-
-static void _vconf_get_recursive(KeySet **ks, const char *key)
-{
-	KeySet *remove_ks = ksNew(0);
-	Key *k, *parentKey;
-
-	parentKey = keyNew(key, KEY_END);
-	kdbGet(g_kdb_handle, remove_ks, parentKey, KDB_O_NORECURSIVE);
-	keyDel(parentKey);
-	ksRewind(remove_ks);
-	while ((k = ksNext(remove_ks)) != 0)
-		if (keyIsDir(k))
-			_vconf_get_recursive(ks, keyName(k));
-
-	ksAppend(*ks, remove_ks);
 }
 
 /*
@@ -236,16 +196,16 @@ API char *vconf_keynode_get_name(keynode_t *keynode)
  */
 API int vconf_keynode_get_type(keynode_t *keynode)
 {
-	retvm_if(keynode == NULL, -1, "Invalid argument: keynode is NULL");
+	retvm_if(keynode == NULL, VCONF_ERROR, "Invalid argument: keynode is NULL");
 
 	return keynode->type;
 }
 
 API int vconf_keynode_get_int(keynode_t *keynode)
 {
-	retvm_if(keynode == NULL, -1, "Invalid argument: keynode is NULL");
-	retvm_if(keynode->type != VCONF_TYPE_INT, -1,
-		 "The type of keynode is not INT");
+	retvm_if(keynode == NULL, VCONF_ERROR, "Invalid argument: keynode is NULL");
+	retvm_if(keynode->type != VCONF_TYPE_INT, VCONF_ERROR,
+		 "The type(%d) of keynode(%s) is not INT", keynode->type, keynode->keyname);
 
 	return keynode->value.i;
 }
@@ -254,7 +214,7 @@ API double vconf_keynode_get_dbl(keynode_t *keynode)
 {
 	retvm_if(keynode == NULL, -1.0, "Invalid argument: keynode is NULL");
 	retvm_if(keynode->type != VCONF_TYPE_DOUBLE, -1.0,
-		 "The type of keynode is not DBL");
+		 "The type(%d) of keynode(%s) is not DBL", keynode->type, keynode->keyname);
 
 	return keynode->value.d;
 }
@@ -266,9 +226,9 @@ API double vconf_keynode_get_dbl(keynode_t *keynode)
  */
 API int vconf_keynode_get_bool(keynode_t *keynode)
 {
-	retvm_if(keynode == NULL, -1, "Invalid argument: keynode is NULL");
-	retvm_if(keynode->type != VCONF_TYPE_BOOL, -1,
-		 "The type of keynode is not BOOL");
+	retvm_if(keynode == NULL, VCONF_ERROR, "Invalid argument: keynode is NULL");
+	retvm_if(keynode->type != VCONF_TYPE_BOOL, VCONF_ERROR,
+		 "The type(%d) of keynode(%s) is not BOOL", keynode->type, keynode->keyname);
 
 	return !!(keynode->value.b);
 }
@@ -282,21 +242,9 @@ API char *vconf_keynode_get_str(keynode_t *keynode)
 {
 	retvm_if(keynode == NULL, NULL, "Invalid argument: keynode is NULL");
 	retvm_if(keynode->type != VCONF_TYPE_STRING, NULL,
-		 "The type of keynode is not STR");
+		"The type(%d) of keynode(%s) is not STR", keynode->type, keynode->keyname);
 
 	return keynode->value.s;
-}
-
-API char *vconf_keynode_steal_str(keynode_t *keynode)
-{
-	char *ret;
-	retvm_if(keynode == NULL, NULL, "Invalid argument: keynode is NULL");
-	retvm_if(keynode->type != VCONF_TYPE_STRING, NULL,
-		 "The type of keynode is not STR");
-
-	ret = keynode->value.s;
-	keynode->value.s = NULL;
-	return ret;
 }
 
 /*
@@ -318,7 +266,7 @@ API keylist_t *vconf_keylist_new(void)
  */
 API int vconf_keylist_rewind(keylist_t *keylist)
 {
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is NULL");
 
 	keylist->cursor = NULL;
 
@@ -334,13 +282,13 @@ API int vconf_keylist_free(keylist_t *keylist)
 {
 	keynode_t *keynode, *temp;
 
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is NULL");
 
 	if (keylist->num) {
-		keynode = keylist_headnode(keylist);
+		keynode = _vconf_keylist_headnode(keylist);
 		while (keynode) {
-			temp = keynode_next(keynode);
-			keynode_free(keynode);
+			temp = _vconf_keynode_next(keynode);
+			_vconf_keynode_free(keynode);
 			keynode = temp;
 		}
 	}
@@ -361,12 +309,11 @@ vconf_keylist_lookup(keylist_t *keylist,
 {
 	keynode_t *found_node;
 
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
-	retvm_if(keyname == NULL, -1, "Invalid argument: keyname is NULL");
-	retvm_if(return_node == NULL, -1,
-		 "Invalid argument: return_node is NULL");
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is NULL");
+	retvm_if(keyname == NULL, VCONF_ERROR, "Invalid argument: keyname is NULL");
+	retvm_if(return_node == NULL, VCONF_ERROR, "Invalid argument: return_node is NULL");
 
-	found_node = keylist_lookup(keylist, keyname, NULL);
+	found_node = _vconf_keylist_lookup(keylist, keyname, NULL);
 	if (NULL == found_node)
 		return 0;
 
@@ -386,40 +333,11 @@ API keynode_t *vconf_keylist_nextnode(keylist_t *keylist)
 	retvm_if(keylist == NULL, NULL, "Invalid argument: keylist is NULL");
 
 	if (keylist->cursor)
-		keylist->cursor = keynode_next(keylist->cursor);
+		keylist->cursor = _vconf_keynode_next(keylist->cursor);
 	else
 		keylist->cursor = keylist->head;
 
 	return keylist->cursor;
-}
-
-static int _vconf_keylist_add_dir(keylist_t *keylist, const char *keyname)
-{
-	keynode_t *keynode, *addition;
-
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
-	retvm_if(keyname == NULL, -1, "Invalid argument: keyname is NULL");
-
-	if ((keynode = keylist_lookup(keylist, keyname, NULL))) {
-		keynode_set_dir(keynode);
-		return keylist->num;
-	}
-	if ((keynode = keylist_headnode(keylist)))
-		while (keynode_next(keynode))
-			keynode = keynode_next(keynode);
-
-	addition = calloc(1, sizeof(keynode_t));
-	if (!keynode_set_keyname(addition, keyname)) {
-		keynode_set_dir(addition);
-		if (keylist->head && NULL != keynode)
-			keynode->next = addition;
-		else
-			keylist->head = addition;
-		keylist->num += 1;
-	} else
-		ERR("(maybe)not enought memory");
-
-	return keylist->num;
 }
 
 /*
@@ -435,20 +353,20 @@ vconf_keylist_add_int(keylist_t *keylist, const char *keyname, const int value)
 {
 	keynode_t *keynode, *addition;
 
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
-	retvm_if(keyname == NULL, -1, "Invalid argument: keyname is NULL");
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is NULL");
+	retvm_if(keyname == NULL, VCONF_ERROR, "Invalid argument: keyname is NULL");
 
-	if ((keynode = keylist_lookup(keylist, keyname, NULL))) {
-		keynode_set_value_int(keynode, value);
+	if ((keynode = _vconf_keylist_lookup(keylist, keyname, NULL))) {
+		_vconf_keynode_set_value_int(keynode, value);
 		return keylist->num;
 	}
-	if ((keynode = keylist_headnode(keylist)))
-		while (keynode_next(keynode))
-			keynode = keynode_next(keynode);
+	if ((keynode = _vconf_keylist_headnode(keylist)))
+		while (_vconf_keynode_next(keynode))
+			keynode = _vconf_keynode_next(keynode);
 
 	addition = calloc(1, sizeof(keynode_t));
-	if (!keynode_set_keyname(addition, keyname)) {
-		keynode_set_value_int(addition, value);
+	if (!_vconf_keynode_set_keyname(addition, keyname)) {
+		_vconf_keynode_set_value_int(addition, value);
 		if (keylist->head && NULL != keynode)
 			keynode->next = addition;
 		else
@@ -473,20 +391,20 @@ vconf_keylist_add_bool(keylist_t *keylist, const char *keyname, const int value)
 {
 	keynode_t *keynode, *addition;
 
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
-	retvm_if(keyname == NULL, -1, "Invalid argument: keyname is NULL");
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is NULL");
+	retvm_if(keyname == NULL, VCONF_ERROR, "Invalid argument: keyname is NULL");
 
-	if ((keynode = keylist_lookup(keylist, keyname, NULL))) {
-		keynode_set_value_bool(keynode, value);
+	if ((keynode = _vconf_keylist_lookup(keylist, keyname, NULL))) {
+		_vconf_keynode_set_value_bool(keynode, value);
 		return keylist->num;
 	}
-	if ((keynode = keylist_headnode(keylist)))
-		while (keynode_next(keynode))
-			keynode = keynode_next(keynode);
+	if ((keynode = _vconf_keylist_headnode(keylist)))
+		while (_vconf_keynode_next(keynode))
+			keynode = _vconf_keynode_next(keynode);
 
 	addition = calloc(1, sizeof(keynode_t));
-	if (!keynode_set_keyname(addition, keyname)) {
-		keynode_set_value_bool(addition, value);
+	if (!_vconf_keynode_set_keyname(addition, keyname)) {
+		_vconf_keynode_set_value_bool(addition, value);
 		if (keylist->head && NULL != keynode)
 			keynode->next = addition;
 		else
@@ -512,20 +430,20 @@ vconf_keylist_add_dbl(keylist_t *keylist,
 {
 	keynode_t *keynode, *addition;
 
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
-	retvm_if(keyname == NULL, -1, "Invalid argument: keyname is NULL");
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is NULL");
+	retvm_if(keyname == NULL, VCONF_ERROR, "Invalid argument: keyname is NULL");
 
-	if ((keynode = keylist_lookup(keylist, keyname, NULL))) {
-		keynode_set_value_dbl(keynode, value);
+	if ((keynode = _vconf_keylist_lookup(keylist, keyname, NULL))) {
+		_vconf_keynode_set_value_dbl(keynode, value);
 		return keylist->num;
 	}
-	if ((keynode = keylist_headnode(keylist)))
-		while (keynode_next(keynode))
-			keynode = keynode_next(keynode);
+	if ((keynode = _vconf_keylist_headnode(keylist)))
+		while (_vconf_keynode_next(keynode))
+			keynode = _vconf_keynode_next(keynode);
 
 	addition = calloc(1, sizeof(keynode_t));
-	if (!keynode_set_keyname(addition, keyname)) {
-		keynode_set_value_dbl(addition, value);
+	if (!_vconf_keynode_set_keyname(addition, keyname)) {
+		_vconf_keynode_set_value_dbl(addition, value);
 		if (keylist->head && NULL != keynode)
 			keynode->next = addition;
 		else
@@ -551,22 +469,22 @@ vconf_keylist_add_str(keylist_t *keylist,
 {
 	keynode_t *keynode, *addition;
 
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
-	retvm_if(keyname == NULL, -1, "Invalid argument: keyname is NULL");
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is NULL");
+	retvm_if(keyname == NULL, VCONF_ERROR, "Invalid argument: keyname is NULL");
 
-	if ((keynode = keylist_lookup(keylist, keyname, NULL))) {
+	if ((keynode = _vconf_keylist_lookup(keylist, keyname, NULL))) {
 		if (VCONF_TYPE_STRING == keynode->type && keynode->value.s)
 			free(keynode->value.s);
-		keynode_set_value_str(keynode, value);
+		_vconf_keynode_set_value_str(keynode, value);
 		return keylist->num;
 	}
-	if (NULL != (keynode = keylist_headnode(keylist)))
-		while (keynode_next(keynode))
-			keynode = keynode_next(keynode);
+	if (NULL != (keynode = _vconf_keylist_headnode(keylist)))
+		while (_vconf_keynode_next(keynode))
+			keynode = _vconf_keynode_next(keynode);
 
 	addition = calloc(1, sizeof(keynode_t));
-	if (!keynode_set_keyname(addition, keyname)) {
-		keynode_set_value_str(addition, value);
+	if (!_vconf_keynode_set_keyname(addition, keyname)) {
+		_vconf_keynode_set_value_str(addition, value);
 		if (keylist->head && NULL != keynode)
 			keynode->next = addition;
 		else
@@ -589,20 +507,20 @@ API int vconf_keylist_add_null(keylist_t *keylist, const char *keyname)
 {
 	keynode_t *keynode, *addition;
 
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
-	retvm_if(keyname == NULL, -1, "Invalid argument: keyname is NULL");
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is NULL");
+	retvm_if(keyname == NULL, VCONF_ERROR, "Invalid argument: keyname is NULL");
 
-	if (NULL != (keynode = keylist_lookup(keylist, keyname, NULL))) {
+	if (NULL != (keynode = _vconf_keylist_lookup(keylist, keyname, NULL))) {
 		keynode->type = 0;
 		keynode->value.d = 0;
 		return keylist->num;
 	}
-	if ((keynode = keylist_headnode(keylist)))
-		while (keynode_next(keynode))
-			keynode = keynode_next(keynode);
+	if ((keynode = _vconf_keylist_headnode(keylist)))
+		while (_vconf_keynode_next(keynode))
+			keynode = _vconf_keynode_next(keynode);
 
 	addition = calloc(1, sizeof(keynode_t));
-	if (!keynode_set_keyname(addition, keyname)) {
+	if (!_vconf_keynode_set_keyname(addition, keyname)) {
 		if (keylist->head && keynode)
 			keynode->next = addition;
 		else
@@ -622,40 +540,443 @@ API int vconf_keylist_add_null(keylist_t *keylist, const char *keyname)
  */
 API int vconf_keylist_del(keylist_t *keylist, const char *keyname)
 {
-	keynode_t *found_node, *before_node;
+	keynode_t *found_node, *before_node = NULL;
 
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
-	retvm_if(keyname == NULL, -1, "Invalid argument: keyname is NULL");
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is NULL");
+	retvm_if(keyname == NULL, VCONF_ERROR, "Invalid argument: keyname is NULL");
 
-	if ((found_node = keylist_lookup(keylist, keyname, &before_node))) {
-		before_node->next = found_node->next;
-		keynode_free(found_node);
+	if ((found_node = _vconf_keylist_lookup(keylist, keyname, &before_node))) {
+		if(before_node) {
+			before_node->next = found_node->next;
+		} else {
+			/* requested key is headnode of keylist */
+			keylist->head = found_node->next;
+		}
+
+		_vconf_keynode_free(found_node);
 	} else
-		return -2;
+		return VCONF_ERROR;
+
+	return VCONF_OK;
+}
+
+
+int _vconf_get_key_prefix(const char *keyname, int *prefix)
+{
+	if (strncmp(keyname, BACKEND_DB_PREFIX, sizeof(BACKEND_DB_PREFIX) - 1) == 0) {
+		*prefix = VCONF_BACKEND_DB;
+	} else if (0 == strncmp(keyname, BACKEND_FILE_PREFIX, sizeof(BACKEND_FILE_PREFIX) - 1)) {
+		*prefix = VCONF_BACKEND_FILE;
+	} else if (0 == strncmp(keyname, BACKEND_MEMORY_PREFIX, sizeof(BACKEND_MEMORY_PREFIX) - 1)) {
+		*prefix = VCONF_BACKEND_MEMORY;
+	} else {
+		ERR("Invalid argument: wrong prefix of key(%s)", keyname);
+		*prefix = VCONF_BACKEND_NULL;
+		return VCONF_ERROR_WRONG_PREFIX;
+	}
+
+	return VCONF_OK;
+}
+
+int _vconf_get_key_path(const char *keyname, char *path)
+{
+	if (strncmp(keyname, BACKEND_DB_PREFIX, sizeof(BACKEND_DB_PREFIX) - 1) == 0) {
+		snprintf(path, KEY_PATH, "%s%s", BACKEND_SYSTEM_DIR, keyname);
+	} else if (0 == strncmp(keyname, BACKEND_FILE_PREFIX, sizeof(BACKEND_FILE_PREFIX) - 1)) {
+		snprintf(path, KEY_PATH, "%s%s", BACKEND_SYSTEM_DIR, keyname);
+	} else if (0 == strncmp(keyname, BACKEND_MEMORY_PREFIX, sizeof(BACKEND_MEMORY_PREFIX) - 1)) {
+		snprintf(path, KEY_PATH, "%s%s", BACKEND_MEMORY_DIR, keyname);
+	} else {
+		ERR("Invalid argument: wrong prefix of key(%s)", keyname);
+		return VCONF_ERROR_WRONG_PREFIX;
+	}
+
+	return VCONF_OK;
+}
+
+#ifndef DISABLE_RUNTIME_KEY_CREATION
+static int _vconf_set_key_check_parent_dir(const char* path)
+{
+	int exists = 0;
+	struct stat stat_info;
+	char* parent;
+	char path_buf[KEY_PATH] = {0,};
+	int ret = 0;
+
+	mode_t dir_mode =  0664 | 0111;
+
+	parent = strrchr(path, '/');
+	strncpy(path_buf, path, parent-path);
+	path_buf[parent-path]=0;
+
+	exists = stat(path_buf,&stat_info);
+	if(exists){
+		if(mkdir(path_buf, dir_mode) != 0) {
+			if(errno == ENOENT) {
+				ret = _vconf_set_key_check_parent_dir((const char*)path_buf);
+				if(ret != VCONF_OK) return ret;
+				if(mkdir(path_buf, dir_mode) != 0) {
+					ERR("mkdir error(%d)", errno);
+					return VCONF_ERROR;
+				}
+			}
+		}
+	}
+
+	return VCONF_OK;
+}
+
+static int _vconf_set_key_creation(const char* path)
+{
+	int fd;
+	mode_t temp;
+	temp = umask(0000);
+	fd = open(path, O_RDWR|O_CREAT, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
+	umask(temp);
+	if(fd == -1) {
+		ERR("open(rdwr,create) error\n");
+		return VCONF_ERROR;
+	}
+	close(fd);
+
+	return VCONF_OK;
+}
+#endif
+
+static int _vconf_set_file_lock(int fd, short type)
+{
+#ifdef HAVE_FCNTL_H
+	int ret = 0;
+	struct flock l;
+
+	l.l_type = type; /*Do read Lock*/
+	l.l_start= 0;	    /*Start at begin*/
+	l.l_whence = SEEK_SET;
+	l.l_len = 0;	    /*Do it with whole file*/
+	ret = fcntl(fd, F_SETLKW, &l);
+	return ret;
+#else
+	return 0;
+#endif
+}
+
+static int _vconf_set_read_lock(int fd)
+{
+	return _vconf_set_file_lock(fd, F_RDLCK);
+}
+
+static int _vconf_set_write_lock(int fd)
+{
+	return _vconf_set_file_lock(fd, F_WRLCK);
+}
+
+static int _vconf_set_unlock(int fd)
+{
+	return _vconf_set_file_lock(fd, F_UNLCK);
+}
+
+static void _vconf_acquire_transaction_delay(int ms)
+{
+    struct timeval timeout;
+    timeout.tv_sec = ms / 1000 ;
+    timeout.tv_usec = 1000 * ( ms % 1000 );
+
+    select(0, 0, 0, 0, &timeout);
+}
+
+static int _vconf_db_begin_transaction()
+{
+	pid_t value;
+	VCONF_MOUNT_PATH_CHECK;
+
+	if(is_transaction == 0) {
+		value = getpid();
+transaction_retry:
+		if(setxattr(VCONF_MOUNT_PATH, "full_db_transaction_start", &value, sizeof(value), 0) == -1)
+		{
+			_vconf_acquire_transaction_delay(50);
+			goto transaction_retry;
+		} else {
+			is_transaction++;
+		}
+	} else {
+		is_transaction++;
+	}
+
+	return VCONF_OK;
+}
+
+static int _vconf_db_commit_transaction()
+{
+	pid_t value;
+	VCONF_MOUNT_PATH_CHECK;
+
+	retv_if(is_transaction <= 0, VCONF_ERROR);
+
+	if(is_transaction == 1) {
+		value = getpid();
+		setxattr(VCONF_MOUNT_PATH, "full_db_transaction_stop", &value, sizeof(value), 0);
+		is_transaction = 0;
+	} else {
+		is_transaction --;
+	}
 
 	return 0;
 }
 
-API int vconf_sync_key(const char *in_key)
+static int _vconf_db_rollback_transaction()
 {
-	START_TIME_CHECK 
+	pid_t value;
+	VCONF_MOUNT_PATH_CHECK;
 
-	int fd;
-	char path[PATH_MAX];
-	char *key;
-	int backend_type;
+	retv_if(is_transaction <= 0, VCONF_ERROR);
 
-	backend_type = trans_keyname(in_key, &key);
-
-	retvm_if(backend_type != VCONF_BACKEND_FILE, -1,
-		 "Invalid argument: file Backend is only valid");
-	snprintf(path, PATH_MAX, "%s/%s", KDB_SYSTEM_DIR, key);
-
-	fd = open(path, O_RDWR);
-	fsync(fd);
-	close(fd);
+	if(is_transaction == 1) {
+		value = getpid();
+		setxattr(VCONF_MOUNT_PATH, "full_db_transaction_rb", &value, sizeof(value), 0);
+		is_transaction = 0;
+	} else {
+		is_transaction --;
+	}
 
 	return 0;
+}
+
+static int _vconf_set_key_filesys(keynode_t *keynode, int prefix)
+{
+	char path[KEY_PATH] = {0,};
+	FILE *fp = NULL;
+	int ret = -1;
+	int func_ret = VCONF_OK;
+	int err_no = 0;
+	char err_buf[100] = { 0, };
+	int is_write_error = 0;
+
+	errno = 0;
+
+	ret = _vconf_get_key_path(keynode->keyname, path);
+	retv_if(ret != VCONF_OK, ret);
+
+	if( (fp = fopen(path, "w")) == NULL ) {
+		func_ret = VCONF_ERROR_FILE_OPEN;
+		err_no = errno;
+		goto out_return;
+	}
+
+	if(prefix != VCONF_BACKEND_DB) {
+		_vconf_set_write_lock(fileno(fp));
+		if(errno != 0) {
+			func_ret = VCONF_ERROR_FILE_LOCK;
+			err_no = errno;
+			goto out_close;
+		}
+	}
+
+	/* write key type */
+	ret = fwrite((void *)&(keynode->type), sizeof(int), 1, fp);
+	if(ret <= 0)
+	{
+		if(errno) {
+			err_no = errno;
+		} else {
+			errno = EAGAIN;
+		}
+		func_ret = VCONF_ERROR_FILE_WRITE;
+		goto out_unlock;
+	}
+
+	/* write key value */
+	switch(keynode->type)
+	{
+		case VCONF_TYPE_INT:
+			ret = fwrite((void *)&(keynode->value.i), sizeof(int), 1, fp);
+			if(ret <= 0) is_write_error = 1;
+			break;
+		case VCONF_TYPE_DOUBLE:
+			ret = fwrite((void *)&(keynode->value.d), sizeof(double), 1, fp);
+			if(ret <= 0) is_write_error = 1;
+			break;
+		case VCONF_TYPE_BOOL:
+			ret = fwrite((void *)&(keynode->value.b), sizeof(int), 1, fp);
+			if(ret <= 0) is_write_error = 1;
+			break;
+		case VCONF_TYPE_STRING:
+			ret = fprintf(fp,"%s",keynode->value.s);
+			if(ret < strlen(keynode->value.s)) is_write_error = 1;
+			//ret = fwrite((void *)keynode->value.s, sizeof(char), strlen(keynode->value.s), fp);
+			break;
+		default :
+			func_ret = VCONF_ERROR_WRONG_TYPE;
+			goto out_unlock;
+	}
+	if(is_write_error)
+	{
+		if(errno) {
+			err_no = errno;
+		} else {
+			errno = EAGAIN;
+		}
+		func_ret = VCONF_ERROR_FILE_WRITE;
+		goto out_unlock;
+	}
+
+#ifdef ENABLE_FDATASYNC
+	if(prefix == VCONF_BACKEND_FILE) {
+		fflush(fp);
+
+		ret = fdatasync(fileno(fp));
+		if(ret == -1) {
+			err_no = errno;
+			func_ret = VCONF_ERROR_FILE_SYNC;
+		}
+	}
+#endif
+
+out_unlock :
+	if(prefix != VCONF_BACKEND_DB) {
+		_vconf_set_unlock(fileno(fp));
+		if(errno != 0) {
+			func_ret = VCONF_ERROR_FILE_LOCK;
+			err_no = errno;
+			goto out_close;
+		}
+	}
+
+out_close :
+	fclose(fp);
+
+out_return :
+	if(err_no != 0) {
+		strerror_r(err_no, err_buf, 100);
+		ERR("_vconf_set_key_filesys(%d-%s) step(%d) failed(%d / %s)\n", keynode->type, keynode->keyname, func_ret, err_no, err_buf);
+	}
+
+	return func_ret;
+}
+
+static int _vconf_set_key(keynode_t *keynode)
+{
+	int func_ret = VCONF_OK;
+	int ret = 0;
+	int is_busy_err = 0;
+	int retry = -1;
+	int prefix = 0;
+	int rc = 0;
+
+	ret = _vconf_get_key_prefix(keynode->keyname, &prefix);
+	retv_if(ret != VCONF_OK, ret);
+
+	if(prefix == VCONF_BACKEND_DB) {
+		_vconf_db_begin_transaction();
+	}
+
+	while((ret = _vconf_set_key_filesys(keynode, prefix)) != VCONF_OK)
+	{
+		is_busy_err = 0;
+		retry++;
+
+		if(ret == VCONF_ERROR_FILE_OPEN)
+		{
+			switch (errno)
+			{
+				/* file is not exist, make path */
+#ifndef DISABLE_RUNTIME_KEY_CREATION
+				case EFAULT :
+				case ENOENT :
+				{
+					char path[KEY_PATH] = {0,};
+					rc = _vconf_get_key_path(keynode->keyname, path);
+					if(rc != VCONF_OK) {
+						ERR("_vconf_get_key_path error");
+						break;
+					}
+
+					ret = _vconf_set_key_check_parent_dir(path);
+					if(rc != VCONF_OK) {
+						ERR("_vconf_set_key_check_parent_dir error : %s", path);
+						break;
+					}
+
+					ret = _vconf_set_key_creation(path);
+					if(rc != VCONF_OK) {
+						ERR("_vconf_set_key_creation error : %s", path);
+						break;
+					}
+					INFO("%s key is created", keynode->keyname);
+				}
+#endif
+				case EAGAIN :
+				case EMFILE :
+				case ENFILE :
+				case ETXTBSY :
+				{
+					is_busy_err = 1;
+				}
+			}
+		}
+		else if (ret == VCONF_ERROR_FILE_CHMOD)
+		{
+			switch (errno)
+			{
+				case EINTR :
+				case EBADF :
+				{
+					is_busy_err = 1;
+				}
+			}
+		}
+		else if (ret == VCONF_ERROR_FILE_LOCK)
+		{
+			switch (errno)
+			{
+				case EBADF :
+				case EACCES :
+				case EAGAIN :
+				case ENOLCK :
+				{
+					is_busy_err = 1;
+				}
+			}
+		}
+		else if (ret == VCONF_ERROR_FILE_WRITE)
+		{
+			switch (errno)
+			{
+				case 0 :
+				case EAGAIN :
+				case EINTR :
+				case EIO :
+				case ENOMEM :
+				{
+					is_busy_err = 1;
+				}
+			}
+		}
+		else
+		{
+			is_busy_err = 0;
+		}
+
+		if ((is_busy_err == 1) && (retry < VCONF_ERROR_RETRY_CNT)) {
+			ERR("%s : write buf error(%d). write will be retried(%d) , usleep time : %d\n", keynode->keyname, ret, retry, (retry)*VCONF_ERROR_RETRY_SLEEP_UTIME);
+			usleep((retry)*VCONF_ERROR_RETRY_SLEEP_UTIME);
+			continue;
+		} else {
+			ERR("%s : write buf error(%d). break. (%d)\n", keynode->keyname, ret, retry);
+			func_ret = VCONF_ERROR;
+			break;
+		}
+	}
+
+	if(prefix == VCONF_BACKEND_DB) {
+		if(func_ret == VCONF_ERROR) {
+			_vconf_db_rollback_transaction();
+		} else {
+			_vconf_db_commit_transaction();
+		}
+	}
+
+	return func_ret;
 }
 
 /*
@@ -665,127 +986,69 @@ API int vconf_sync_key(const char *in_key)
  */
 API int vconf_set(keylist_t *keylist)
 {
-	START_TIME_CHECK 
+	START_TIME_CHECK
 
-	char buf[BUF_LEN] = { 0, };
 	keynode_t *got_node;
-	char *changedname;
-	int backend_type;
-	int error_loop_cnt = 0;
-	KeySet *ks = ksNew(0);
 
-	retex_if(keylist == NULL, "Invalid argument: keylist is NULL");
+	int func_ret = VCONF_OK;
+	int ret = 0;
+	int prefix = 0;
 
-	INFO("(%d)START", keylist->num);
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is NULL");
 
-	got_node = keylist_headnode(keylist);
+	INFO("vconf_set (%d)START", keylist->num);
+
+	got_node = _vconf_keylist_headnode(keylist);
+
+	retvm_if(got_node == NULL, VCONF_ERROR, "Invalid argument: headnode is NULL");
+
+	ret = _vconf_get_key_prefix(got_node->keyname, &prefix);
+	retv_if(ret != VCONF_OK, ret);
+
+	if(prefix == VCONF_BACKEND_DB) {
+		_vconf_db_begin_transaction();
+	}
+
 	while (got_node != NULL) {
-		backend_type = trans_keyname(got_node->keyname, &changedname);
-		if (VCONF_BACKEND_NULL == backend_type) {
-			got_node = keynode_next(got_node);
-			continue;
+		ret = _vconf_set_key(got_node);
+		if(ret != VCONF_OK) {
+			func_ret = VCONF_ERROR;
 		}
 
-		retex_if(-1 == check_connetion(backend_type, NULL),
-			 "Connection Fail(%s)", got_node->keyname);
-
-		switch (backend_type) {
-		case VCONF_BACKEND_DB:
-		case VCONF_BACKEND_FILE:
-		case VCONF_BACKEND_MEMORY:
-			switch (got_node->type) {
-			case VCONF_TYPE_INT:
-				snprintf(buf, BUF_LEN, "%d", got_node->value.i);
-				ksAppendKey(ks,
-					    keyNew(changedname, KEY_TYPE,
-						   VCONF_TYPE_INT, KEY_VALUE,
-						   buf, KEY_END));
-				break;
-			case VCONF_TYPE_DOUBLE:
-				snprintf(buf, BUF_LEN, "%f", got_node->value.d);
-				ksAppendKey(ks,
-					    keyNew(changedname, KEY_TYPE,
-						   VCONF_TYPE_DOUBLE, KEY_VALUE,
-						   buf, KEY_END));
-				break;
-			case VCONF_TYPE_BOOL:
-				snprintf(buf, BUF_LEN, "%d", got_node->value.b);
-				ksAppendKey(ks,
-					    keyNew(changedname, KEY_TYPE,
-						   VCONF_TYPE_BOOL, KEY_VALUE,
-						   buf, KEY_END));
-				break;
-			case VCONF_TYPE_STRING:
-				ksAppendKey(ks,
-					    keyNew(changedname, KEY_TYPE,
-						   VCONF_TYPE_STRING, KEY_VALUE,
-						   got_node->value.s, KEY_END));
-				break;
-			default:
-				ERR("Key(%s) has Unknown Type",
-				    got_node->keyname);
-			}
-#ifdef ADDR_TRANS
-			if (got_node->keyname != changedname)
-				free(changedname);
-#endif
-			break;
-		default:
-			ERR("Key(%s) has Unknown Backend", got_node->keyname);
-		}
-
-		got_node = keynode_next(got_node);
+		got_node = _vconf_keynode_next(got_node);
 	}
 
-	if (ksGetSize(ks)) {
-		while (kdbSet(g_kdb_handle, ks, 0, 0)) {
-			/* We got an error. Retry 5 times. */
-			if (error_loop_cnt == MAX_ERROR_LOOP_CNT) {
-				Key *problem;
-				char keyname[300] = "";
-
-				problem = ksCurrent(ks);
-				if (problem)
-					keyGetFullName(problem, keyname,
-						       sizeof(keyname));
-				ERR("kdbSet error: while saving %s", keyname);
-
-				/* And try to set keys again starting 
-				   from the next key, */
-				/* unless we reached the end of KeySet */
-				if (ksNext(ks) == 0)
-					break;
-			} else {
-				usleep(ERROR_LOOP_SLEEP_TIME);
-				error_loop_cnt++;
-			}
+	if(prefix == VCONF_BACKEND_DB) {
+		if(func_ret == VCONF_ERROR) {
+			_vconf_db_rollback_transaction();
+		} else {
+			_vconf_db_commit_transaction();
 		}
 	}
 
-	ksDel(ks);
-	END_TIME_CHECK 
-	return 0;
+	END_TIME_CHECK
 
- CATCH:
-
-	ksDel(ks);
-	return -1;
+	return func_ret;
 }
 
-static int _vconf_set_key(Key *k)
+API int vconf_sync_key(const char *in_key)
 {
-	int error_loop_cnt = 0;
-	while (kdbSetKey(g_kdb_handle, k)) {
-		ERR("kdbSetKey() failed");
+	START_TIME_CHECK
 
-		if (error_loop_cnt == MAX_ERROR_LOOP_CNT) {
-			ERR("Retry %d times in error handler", error_loop_cnt);
-			return -1;
-		} else {
-			usleep(ERROR_LOOP_SLEEP_TIME);
-			error_loop_cnt++;
-		}
-	}
+	int fd;
+	char path[KEY_PATH] = {0,};
+	int ret = -1;
+
+	ret = _vconf_get_key_path(in_key, path);
+	if(ret != VCONF_OK) return VCONF_ERROR;
+
+	fd = open(path, O_RDWR);
+	if(fd == -1) return VCONF_ERROR;
+
+	fsync(fd);
+	close(fd);
+
+	END_TIME_CHECK
 
 	return 0;
 }
@@ -800,57 +1063,39 @@ API int vconf_set_int(const char *in_key, const int intval)
 {
 	START_TIME_CHECK
 
-	char buf[BUF_LEN] = { 0, };
-	char *key;
-	int backend_type;
-	Key *k;
+	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is NULL");
 
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: Backend is not valid");
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "Connection Fail(%s)", in_key);
+	int func_ret = VCONF_OK;
 
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		snprintf(buf, BUF_LEN, "%d", intval);
+	keynode_t* pKeyNode = _vconf_keynode_new();
+	retvm_if(pKeyNode == NULL, VCONF_ERROR, "key malloc fail");
 
-		k = keyNew(key, KEY_TYPE, VCONF_TYPE_INT, KEY_VALUE, buf,
-			   KEY_END);
-		if (k == NULL) {
-			ERR("kdbNew() failed");
-#ifdef ADDR_TRANS
-			if (key != in_key)
-				free(key);
-#endif
-			return -1;
-		}
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-
-		if (_vconf_set_key(k) < 0) {
-			keyDel(k);
-			return -1;
-		}
-
-		keyDel(k);
-		break;
-	default:
-		ERR("Key(%s) has Unknown Backend", in_key);
+	func_ret = _vconf_keynode_set_keyname(pKeyNode, in_key);
+	if(func_ret != VCONF_OK) {
+		_vconf_keynode_free(pKeyNode);
+		ERR("set key name error");
+		return VCONF_ERROR;
 	}
-	INFO("vconf_set_int(%d) : %s(%d) success", getpid(), in_key, intval);
-	END_TIME_CHECK 
-	return 0;
+	_vconf_keynode_set_value_int(pKeyNode, intval);
+
+	if (_vconf_set_key(pKeyNode) != VCONF_OK) {
+		ERR("vconf_set_int(%d) : %s(%d) error", getpid(), in_key, intval);
+		func_ret = VCONF_ERROR;
+	} else{
+		INFO("vconf_set_int(%d) : %s(%d) success", getpid(), in_key, intval);
+	}
+
+	_vconf_keynode_free(pKeyNode);
+
+	END_TIME_CHECK
+
+	return func_ret;
 }
 
 /*
 * This function set the boolean value of given key
 * @param[in]	in_key	key
-* @param[in]	boolval boolean value to set 
+* @param[in]	boolval boolean value to set
 		(Integer value 1 is 'True', and 0 is 'False')
 * @return 0 on success, -1 on error
 */
@@ -858,51 +1103,32 @@ API int vconf_set_bool(const char *in_key, const int boolval)
 {
 	START_TIME_CHECK
 
-	char buf[BUF_LEN] = { 0, };
-	char *key;
-	int backend_type;
-	Key *k;
+	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is NULL");
 
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: Backend is not valid");
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "Connection Fail(%s)", in_key);
+	int func_ret = VCONF_OK;
+	keynode_t* pKeyNode = _vconf_keynode_new();
+	retvm_if(pKeyNode == NULL, VCONF_ERROR, "key malloc fail");
 
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		snprintf(buf, BUF_LEN, "%d", !!boolval);
-
-		k = keyNew(key, KEY_TYPE, VCONF_TYPE_BOOL, KEY_VALUE, buf,
-			   KEY_END);
-		if (k == NULL) {
-			ERR("kdbNew() failed");
-#ifdef ADDR_TRANS
-			if (key != in_key)
-				free(key);
-#endif
-			return -1;
-		}
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-
-		if (_vconf_set_key(k) < 0) {
-			keyDel(k);
-			return -1;
-		}
-
-		keyDel(k);
-		break;
-	default:
-		ERR("Key(%s) has Unknown Backend", in_key);
+	func_ret = _vconf_keynode_set_keyname(pKeyNode, in_key);
+	if(func_ret != VCONF_OK) {
+		_vconf_keynode_free(pKeyNode);
+		ERR("set key name error");
+		return VCONF_ERROR;
 	}
-	INFO("vconf_set_bool(%d) : %s(%d) success", getpid(), in_key, boolval);
-	END_TIME_CHECK 
-	return 0;
+	_vconf_keynode_set_value_bool(pKeyNode, boolval);
+
+	if (_vconf_set_key(pKeyNode) != VCONF_OK) {
+		ERR("vconf_set_bool(%d) : %s(%d) error", getpid(), in_key, boolval);
+		func_ret = VCONF_ERROR;
+	} else {
+		INFO("vconf_set_bool(%d) : %s(%d) success", getpid(), in_key, boolval);
+	}
+
+	_vconf_keynode_free(pKeyNode);
+
+	END_TIME_CHECK
+
+	return func_ret;
 }
 
 /*
@@ -915,51 +1141,32 @@ API int vconf_set_dbl(const char *in_key, const double dblval)
 {
 	START_TIME_CHECK
 
-	char buf[BUF_LEN] = { 0, };
-	char *key;
-	int backend_type;
-	Key *k;
+	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is NULL");
 
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: Backend is not valid");
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "Connection Fail(%s)", in_key);
+	int func_ret = VCONF_OK;
+	keynode_t* pKeyNode = _vconf_keynode_new();
+	retvm_if(pKeyNode == NULL, VCONF_ERROR, "key malloc fail");
 
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		snprintf(buf, BUF_LEN, "%f", dblval);
-
-		k = keyNew(key, KEY_TYPE, VCONF_TYPE_DOUBLE, KEY_VALUE, buf,
-			   KEY_END);
-		if (k == NULL) {
-			ERR("kdbNew() failed");
-#ifdef ADDR_TRANS
-			if (key != in_key)
-				free(key);
-#endif
-			return -1;
-		}
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-
-		if (_vconf_set_key(k) < 0) {
-			keyDel(k);
-			return -1;
-		}
-
-		keyDel(k);
-		break;
-	default:
-		ERR("Key(%s) has Unknown Backend", in_key);
+	func_ret = _vconf_keynode_set_keyname(pKeyNode, in_key);
+	if(func_ret != VCONF_OK) {
+		_vconf_keynode_free(pKeyNode);
+		ERR("set key name error");
+		return VCONF_ERROR;
 	}
-	INFO("vconf_set_dbl(%d) : %s(%f) success", getpid(), in_key, dblval);
-	END_TIME_CHECK 
-	return 0;
+	_vconf_keynode_set_value_dbl(pKeyNode, dblval);
+
+	if (_vconf_set_key(pKeyNode) != VCONF_OK) {
+		ERR("vconf_set_dbl(%d) : %s(%f) error", getpid(), in_key, dblval);
+		func_ret = VCONF_ERROR;
+	} else {
+		INFO("vconf_set_dbl(%d) : %s(%f) success", getpid(), in_key, dblval);
+	}
+
+	_vconf_keynode_free(pKeyNode);
+
+	END_TIME_CHECK
+
+	return func_ret;
 }
 
 /*
@@ -970,166 +1177,420 @@ API int vconf_set_dbl(const char *in_key, const double dblval)
  */
 API int vconf_set_str(const char *in_key, const char *strval)
 {
-	START_TIME_CHECK 
+	START_TIME_CHECK
 
-	char *key;
-	int backend_type;
-	Key *k;
+	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is NULL");
+	retvm_if(strval == NULL, VCONF_ERROR, "Invalid argument: value is NULL");
 
-	retvm_if(strval == NULL, -1, "Invaild argument: strval is NULL");
+	int func_ret = VCONF_OK;
+	keynode_t* pKeyNode = _vconf_keynode_new();
+	retvm_if(pKeyNode == NULL, VCONF_ERROR, "key malloc fail");
 
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: Backend is not valid");
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "Connection Fail(%s)", in_key);
-
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		k = keyNew(key, KEY_TYPE, VCONF_TYPE_STRING, KEY_VALUE, strval,
-			   KEY_END);
-		if (k == NULL) {
-			ERR("kdbNew() failed");
-#ifdef ADDR_TRANS
-			if (key != in_key)
-				free(key);
-#endif
-			return -1;
-		}
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-
-		if (_vconf_set_key(k) < 0) {
-			keyDel(k);
-			return -1;
-		}
-
-		keyDel(k);
-		break;
-	default:
-		ERR("Key(%s) has Unknown Backend", in_key);
+	func_ret = _vconf_keynode_set_keyname(pKeyNode, in_key);
+	if(func_ret != VCONF_OK) {
+		_vconf_keynode_free(pKeyNode);
+		ERR("set key name error");
+		return VCONF_ERROR;
 	}
-	
-	INFO("vconf_set_str(%d) : %s(%s) success", getpid(), in_key, strval);
-	END_TIME_CHECK 
-	return 0;
+	_vconf_keynode_set_value_str(pKeyNode, strval);
+
+	if (_vconf_set_key(pKeyNode) != VCONF_OK) {
+		ERR("vconf_set_str(%d) : %s(%s) error", getpid(), in_key, strval);
+		func_ret = VCONF_ERROR;
+	} else {
+		INFO("vconf_set_str(%d) : %s(%s) success", getpid(), in_key, strval);
+	}
+
+	_vconf_keynode_free(pKeyNode);
+
+	END_TIME_CHECK
+
+	return func_ret;
 }
 
-#if 1
 
-/*
- * This function set the binary value of given key
- * @param[in]	in_key	key
- * @param[in]	binval binary value to set
- * @param[in]  size  the size for writing
- * @return 0 on success, -1 on error
- */
-API int vconf_set_bytes(const char *in_key, const void *binval, int size)
+#ifdef SUPPORT_ELEKTRA_VALUE_FORMAT
+/* keyFileUnserialize function of ELEKTRA */
+static int _vconf_get_key_elektra_format(keynode_t *keynode, FILE *fp)
 {
-	START_TIME_CHECK 
+	char version[10] = {0,};
+	char type[5] = {0,};
+	char comment[8] = {0,};
+	char file_buf[BUF_LEN] = {0,};
+	char *value = NULL;
+	int value_size = 0;
+	int err_no = 0;
+	char err_buf[100] = { 0, };
+	int func_ret = VCONF_OK;
 
-	char *key;
-	int backend_type;
-	Key *k;
+	INFO("_vconf_get_key_elektra_format start");
 
-	retvm_if(binval == NULL, -1, "Invaild argument: binval is NULL");
-	retvm_if(size < 0, -1, "Invalid argument: size is not valid");
+	rewind(fp);
 
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: Backend is not valid");
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "Connection Fail(%s)", in_key);
-
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		k = keyNew(key, KEY_TYPE, KEY_TYPE_BINARY, KEY_SIZE, size,
-			   KEY_VALUE, binval, KEY_END);
-		if (k == NULL) {
-			ERR("kdbNew() failed");
-#ifdef ADDR_TRANS
-			if (key != in_key)
-				free(key);
-#endif
-			return -1;
+	if (!fgets(version, sizeof(version), fp))
+	{
+		if(ferror(fp)) {
+			err_no = errno;
+		} else {
+			err_no = EAGAIN;
 		}
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-
-		if (_vconf_set_key(k) < 0) {
-			keyDel(k);
-			return -1;
-		}
-
-		keyDel(k);
-		break;
-	default:
-		ERR("Key(%s) has Unknown Backend", in_key);
+		func_ret = VCONF_ERROR_FILE_FGETS;
+		goto out_return;
 	}
-	INFO("vconf_set_bytes(%d) : %s success", getpid(), in_key);
-	END_TIME_CHECK 
-	return 0;
-}
+	if (strncmp(version,"RG",2)) {
+		func_ret = VCONF_ERROR_WRONG_TYPE;
+		goto out_return;
+	}
 
-/*
- * This function get the binary value of given key up to size bytes.
- * @param[in]	in_key	key
- * @param[out]	buf output buffer
- * @param[in]  size the size for reading
- * @return the number of bytes actually read on success, -1 on error
- */
-API int vconf_get_bytes(const char *in_key, void *buf, int size)
+	if (!fgets(type, sizeof(type), fp))
+	{
+		if(ferror(fp)) {
+			err_no = errno;
+		} else {
+			err_no = EAGAIN;
+		}
+		func_ret = VCONF_ERROR_FILE_FGETS;
+		goto out_return;
+	}
+
+	if (!fgets(comment, sizeof(comment), fp))
+	{
+		if(ferror(fp)) {
+			err_no = errno;
+		} else {
+			err_no = EAGAIN;
+		}
+		func_ret = VCONF_ERROR_FILE_FGETS;
+		goto out_return;
+	}
+
+	while(fgets(file_buf, sizeof(file_buf), fp))
+	{
+		if(value) {
+			value_size = value_size + strlen(file_buf);
+			value = (char *) realloc(value, value_size);
+			if(value == NULL) {
+				func_ret = VCONF_ERROR_NO_MEM;
+				break;
+			}
+			strncat(value, file_buf, strlen(file_buf));
+		} else {
+			value_size = strlen(file_buf) + 1;
+			value = (char *)malloc(value_size);
+			if(value == NULL) {
+				func_ret = VCONF_ERROR_NO_MEM;
+				break;
+			}
+			memset(value, 0x00, value_size);
+			strncpy(value, file_buf, strlen(file_buf));
+		}
+	}
+
+	if(ferror(fp)) {
+		err_no = errno;
+		func_ret = VCONF_ERROR_FILE_FGETS;
+	} else {
+		if(value) {
+			switch(atoi(type))
+			{
+				case VCONF_TYPE_INT:
+				{
+					_vconf_keynode_set_value_int(keynode, atoi(value));
+					break;
+				}
+				case VCONF_TYPE_DOUBLE:
+				{
+					_vconf_keynode_set_value_dbl(keynode, atof(value));
+					break;
+				}
+				case VCONF_TYPE_BOOL:
+				{
+					_vconf_keynode_set_value_bool(keynode, atoi(value));
+					break;
+				}
+				case VCONF_TYPE_STRING:
+				{
+					_vconf_keynode_set_value_str(keynode, value);
+					break;
+				}
+				default :
+				{
+					func_ret = VCONF_ERROR_WRONG_VALUE;
+				}
+			}
+		} else {
+			if(atoi(type) == VCONF_TYPE_STRING) {
+				_vconf_keynode_set_value_str(keynode, "");
+			} else {
+				func_ret = VCONF_ERROR_WRONG_VALUE;
+			}
+		}
+	}
+
+out_return :
+	if(err_no != 0) {
+		strerror_r(err_no, err_buf, 100);
+		ERR("_vconf_set_key_filesys(%d/%s) step(%d) failed(%d / %s)\n", keynode->type, keynode->keyname, func_ret, err_no, err_buf);
+	}
+
+	if(value) free(value);
+
+	return func_ret;
+}
+#endif
+
+static int _vconf_get_key_filesys(keynode_t *keynode, int prefix)
 {
-	START_TIME_CHECK char *key;
-	int backend_type, ret = 0;
-	Key *k;
+	char path[KEY_PATH] = {0,};
+	int ret = -1;
+	int func_ret = VCONF_OK;
+	char err_buf[100] = { 0, };
+	int err_no = 0;
+	int type = 0;
+	FILE *fp = NULL;
 
-	retvm_if(buf == NULL, -1, "Invaild argument: buffer is NULL");
-	retvm_if(size < 0, -1, "Invalid argument: size is not valid");
+	errno = 0;
 
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: Backend is not valid");
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "Connection Fail(%s)", in_key);
+	ret = _vconf_get_key_path(keynode->keyname, path);
+	retv_if(ret != VCONF_OK, ret);
 
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		k = _vconf_kdb_get(key);
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
+	if( (fp = fopen(path, "r")) == NULL ) {
+		func_ret = VCONF_ERROR_FILE_OPEN;
+		err_no = errno;
+		goto out_return;
+	}
+
+	if(prefix != VCONF_BACKEND_DB) {
+		_vconf_set_read_lock(fileno(fp));
+		if(errno != 0) {
+			func_ret = VCONF_ERROR_FILE_LOCK;
+			err_no = errno;
+			goto out_close;
+		}
+	}
+
+	/* read data type */
+	if(!fread((void*)&type, sizeof(int), 1, fp)) {
+		if(ferror(fp)) {
+			err_no = errno;
+		} else {
+			errno = EAGAIN;
+		}
+		func_ret = VCONF_ERROR_FILE_FREAD;
+		goto out_unlock;
+	}
+
+	/* read data value */
+	switch(type)
+	{
+		case VCONF_TYPE_INT:
+		{
+			int value_int = 0;
+			if(!fread((void*)&value_int, sizeof(int), 1, fp)) {
+				if(ferror(fp)) {
+					err_no = errno;
+				} else {
+					errno = EAGAIN;
+				}
+				func_ret = VCONF_ERROR_FILE_FREAD;
+				goto out_unlock;
+			} else {
+				_vconf_keynode_set_value_int(keynode, value_int);
+			}
+
+			break;
+		}
+		case VCONF_TYPE_DOUBLE:
+		{
+			double value_dbl = 0;
+			if(!fread((void*)&value_dbl, sizeof(double), 1, fp)) {
+				if(ferror(fp)) {
+					err_no = errno;
+				} else {
+					errno = EAGAIN;
+				}
+				func_ret = VCONF_ERROR_FILE_FREAD;
+				goto out_unlock;
+			} else {
+				_vconf_keynode_set_value_dbl(keynode, value_dbl);
+			}
+
+			break;
+		}
+		case VCONF_TYPE_BOOL:
+		{
+			int value_int = 0;
+			if(!fread((void*)&value_int, sizeof(int), 1, fp)) {
+				if(ferror(fp)) {
+					err_no = errno;
+				} else {
+					errno = EAGAIN;
+				}
+				func_ret = VCONF_ERROR_FILE_FREAD;
+				goto out_unlock;
+			} else {
+				_vconf_keynode_set_value_bool(keynode, value_int);
+			}
+
+			break;
+		}
+		case VCONF_TYPE_STRING:
+		{
+			char file_buf[BUF_LEN] = {0,};
+			char *value = NULL;
+			int value_size = 0;
+
+			while(fgets(file_buf, sizeof(file_buf), fp))
+			{
+				if(value) {
+					value_size = value_size + strlen(file_buf);
+					value = (char *) realloc(value, value_size);
+					if(value == NULL) {
+						func_ret = VCONF_ERROR_NO_MEM;
+						break;
+					}
+					strncat(value, file_buf, strlen(file_buf));
+				} else {
+					value_size = strlen(file_buf) + 1;
+					value = (char *)malloc(value_size);
+					if(value == NULL) {
+						func_ret = VCONF_ERROR_NO_MEM;
+						break;
+					}
+					memset(value, 0x00, value_size);
+					strncpy(value, file_buf, strlen(file_buf));
+				}
+			}
+
+			if(ferror(fp)) {
+				err_no = errno;
+				func_ret = VCONF_ERROR_FILE_FGETS;
+			} else {
+				if(value) {
+					_vconf_keynode_set_value_str(keynode, value);
+				} else {
+					_vconf_keynode_set_value_str(keynode, "");
+				}
+			}
+
+			break;
+		}
+		default :
+#ifdef SUPPORT_ELEKTRA_VALUE_FORMAT
+			func_ret = _vconf_get_key_elektra_format(keynode, fp);
+#else
+			func_ret = VCONF_ERROR_WRONG_TYPE;
 #endif
-		retvm_if(k == NULL, -1, "kdb get(%s) failed", in_key);
+	}
 
-		if ((ret = keyGetBinary(k, buf, size)) < 0) {
-			/* ERR("Invalid value"); */
-			keyDel(k);
-			return -1;
+out_unlock :
+	if(prefix != VCONF_BACKEND_DB) {
+		_vconf_set_unlock(fileno(fp));
+		if(errno != 0) {
+			func_ret = VCONF_ERROR_FILE_LOCK;
+			err_no = errno;
+			goto out_close;
+		}
+	}
+
+out_close :
+	fclose(fp);
+
+out_return :
+	if(err_no != 0) {
+		strerror_r(err_no, err_buf, 100);
+		ERR("_vconf_get_key_filesys(%d-%s) step(%d) failed(%d / %s)\n", keynode->type, keynode->keyname, func_ret, err_no, err_buf);
+	}
+
+	return func_ret;
+}
+
+
+int _vconf_get_key(keynode_t *keynode)
+{
+	int func_ret = VCONF_OK;
+	int ret = 0;
+	int is_busy_err = 0;
+	int retry = -1;
+	int prefix = 0;
+
+	ret = _vconf_get_key_prefix(keynode->keyname, &prefix);
+	retv_if(ret != VCONF_OK, ret);
+
+	if(prefix == VCONF_BACKEND_DB) {
+		_vconf_db_begin_transaction();
+	}
+
+	while((ret = _vconf_get_key_filesys(keynode, prefix)) != VCONF_OK)
+	{
+		is_busy_err = 0;
+		retry++;
+
+		if(ret == VCONF_ERROR_FILE_OPEN)
+		{
+			switch (errno)
+			{
+				case EAGAIN :
+				case EMFILE :
+				case ETXTBSY :
+				{
+					is_busy_err = 1;
+				}
+			}
+		}
+		else if (ret == VCONF_ERROR_FILE_LOCK)
+		{
+			switch (errno)
+			{
+				case EBADF :
+				case EACCES :
+				case EAGAIN :
+				case ENOLCK :
+				{
+					is_busy_err = 1;
+				}
+			}
+		}
+		else if (ret == VCONF_ERROR_FILE_FREAD)
+		{
+			switch (errno)
+			{
+				case EAGAIN :
+				case EINTR :
+				case EIO :
+				{
+					is_busy_err = 1;
+				}
+			}
+		}
+		else
+		{
+			is_busy_err = 0;
 		}
 
-		keyDel(k);
-		break;
-	default:
-		ERR("Key(%s) has Unknown Backend", in_key);
+		if ((is_busy_err == 1) && (retry < VCONF_ERROR_RETRY_CNT)) {
+			ERR("%s : read buf error(%d). read will be retried(%d) , %d\n", keynode->keyname, ret, retry, (retry)*VCONF_ERROR_RETRY_SLEEP_UTIME);
+			usleep((retry)*VCONF_ERROR_RETRY_SLEEP_UTIME);
+			continue;
+		} else {
+			ERR("%s : read buf error(%d). break\n",  keynode->keyname, ret);
+			func_ret = VCONF_ERROR;
+			break;
+		}
 	}
-	INFO("key(%s) has bytes data", in_key);
-	END_TIME_CHECK 
-	return ret;
-}
-#endif
 
-static int _vconf_check_value_integrity(const void *value, type_t type)
+	if(prefix == VCONF_BACKEND_DB) {
+		if(func_ret == VCONF_ERROR) {
+			_vconf_db_rollback_transaction();
+		} else {
+			_vconf_db_commit_transaction();
+		}
+	}
+
+	return func_ret;
+}
+
+static int _vconf_check_value_integrity(const void *value, int type)
 {
 	int i = 0;
 
@@ -1138,18 +1599,18 @@ static int _vconf_check_value_integrity(const void *value, type_t type)
 	}
 
 	if ((value) && (strlen(value) > 0)) {
-		if ((type == VCONF_TYPE_INT) || 
-			(type == VCONF_TYPE_BOOL)|| 
+		if ((type == VCONF_TYPE_INT) ||
+			(type == VCONF_TYPE_BOOL)||
 			(type == VCONF_TYPE_DOUBLE)) {
 			while (*(((char *)value) + i) != '\0') {
 				if ( !isdigit(*(((char *)value) + i)) ) {
-					if ((type != VCONF_TYPE_BOOL) && 
+					if ((type != VCONF_TYPE_BOOL) &&
 						(*(((char *)value) + i) != '-')) {
-						if ((type == VCONF_TYPE_DOUBLE) && 
+						if ((type == VCONF_TYPE_DOUBLE) &&
 							(*(((char *)value) + i) != '.')) {
 							ERR("ERROR : vconf value is not digit.");
 							return -1;
-						}	
+						}
 					}
 				}
 				i++;
@@ -1163,338 +1624,176 @@ static int _vconf_check_value_integrity(const void *value, type_t type)
 	}
 }
 
-/*
- * This function get the value of given keys
- * @param[in]	keylist	keylist
- * @param[in]	in_parentDIR parent DIRECTORY of needed keys
- * @param[in]	option VCONF_GET_KEY|VCONF_GET_DIR|VCONF_GET_ALL
- * @return 0 on success, -1 on error
- */
-API int
-vconf_get(keylist_t *keylist, const char *in_parentDIR, get_option_t option)
+int _vconf_path_is_dir(char* path)
 {
-	START_TIME_CHECK char *parentDIR;
-	keynode_t *temp_keynode;
-	int backend_type;
-	char orig_keyname[BUF_LEN];
-	int is_getall = 0;
-	KeySet *ks = NULL;
-	Key *k, *parentKey;
-	const void *get_value = NULL;
-#ifdef ADDR_TRANS
-	int changename_type = 0;
-#endif
+	struct stat entryInfo;
 
-	retvm_if(keylist == NULL, -1, "Invalid argument: keylist is NULL");
-	backend_type = trans_keyname(in_parentDIR, &parentDIR);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: Backend is not valid");
-
-	if (backend_type >= VCONF_BACKEND_DB) {
-		KDB_OPEN_HANDLE;
-		retvm_if(g_kdb_handle == NULL, -1, "kdbOpen() failed");
-#ifdef ADDR_TRANS
-		if (in_parentDIR != parentDIR) {
-			if (VCONF_BACKEND_DB == backend_type) {
-				strncpy(orig_keyname, BACKEND_USER_PREFIX,
-					sizeof(BACKEND_USER_PREFIX));
-				changename_type = 4;
-			} else if (VCONF_BACKEND_FILE == backend_type) {
-				strncpy(orig_keyname, BACKEND_SYSTEM_PREFIX,
-					sizeof(BACKEND_SYSTEM_PREFIX));
-				changename_type = 6;
-			}
+	if(lstat(path, &entryInfo) == 0 ) {
+		if( S_ISDIR( entryInfo.st_mode ) ) {
+			return 1;
+		} else {
+			return 0;
 		}
-#endif
+	} else {
+		return VCONF_ERROR;
 	}
-
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		{
-			ks = ksNew(0);
-
-			parentKey = keyNew(parentDIR, KEY_END);
-			temp_keynode = keylist_headnode(keylist);
-
-			if ((NULL != temp_keynode) && (VCONF_GET_KEY != option)) {
-				ERR("Not support mode : Only VCONF_GET_KEY \
-				option support To retrieve key with keylist");
-				keyDel(parentKey);
-				ksDel(ks);
-				return -1;
-			}
-
-			while (temp_keynode != NULL) {
-				if (temp_keynode->keyname) {
-					/* if (0 == strncmp(temp_keynode->keyname, 
-					   parentDIR, sizeof(parentDIR))) */
-					/*kdbGet will handle */
-					ksAppendKey(ks,
-						    keyNew
-						    (temp_keynode->keyname,
-						     KEY_END));
-				}
-				temp_keynode = keynode_next(temp_keynode);
-			}
-
-			if (VCONF_GET_KEY == option)
-				kdbGet(g_kdb_handle, ks, parentKey,
-				       KDB_O_NODIR | KDB_O_NORECURSIVE);
-			else if (VCONF_GET_ALL == option)
-				kdbGet(g_kdb_handle, ks, parentKey,
-				       KDB_O_NORECURSIVE);
-			else
-				kdbGet(g_kdb_handle, ks, parentKey,
-				       KDB_O_DIRONLY | KDB_O_NORECURSIVE);
-
-			keyDel(parentKey);
-			ksRewind(ks);
-			while (((k = ksNext(ks)) != 0)) {
-				switch (keyGetType(k)) {
-				case VCONF_TYPE_INT:
-					get_value = keyValue(k);
-					if (_vconf_check_value_integrity
-					    (get_value, VCONF_TYPE_INT) < 0) {
-						/* ERROR_HANDLING */
-						ERR("_vconf_check_value \
-						integrity (INT) Error");
-						ksDel(ks);
-						return -1;
-					}
-#ifdef ADDR_TRANS
-					if (changename_type) {
-						strncpy(orig_keyname +
-							changename_type,
-							keyName(k) +
-							(changename_type - 2),
-							BUF_LEN - 9);
-						vconf_keylist_add_int(keylist,
-								      orig_keyname,
-								      atoi
-								      (get_value));
-					} else
-#endif
-						vconf_keylist_add_int(keylist,
-								      keyName
-								      (k),
-								      atoi
-								      (get_value));
-
-					break;
-				case VCONF_TYPE_DOUBLE:
-					get_value = keyValue(k);
-					if (_vconf_check_value_integrity
-					    (get_value,
-					     VCONF_TYPE_DOUBLE) < 0) {
-						/* ERROR_HANDLING */
-						ERR("_vconf_check_value \
-						integrity (DBL) Error");
-						ksDel(ks);
-						return -1;
-					}
-#ifdef ADDR_TRANS
-					if (changename_type) {
-						strncpy(orig_keyname +
-							changename_type,
-							keyName(k) +
-							(changename_type - 2),
-							BUF_LEN - 9);
-						vconf_keylist_add_dbl(keylist,
-								      orig_keyname,
-								      atof
-								      (get_value));
-					} else
-#endif
-						vconf_keylist_add_dbl(keylist,
-								      keyName
-								      (k),
-								      atof
-								      (get_value));
-					break;
-				case VCONF_TYPE_BOOL:
-					get_value = keyValue(k);
-					if (_vconf_check_value_integrity
-					    (get_value, VCONF_TYPE_BOOL)
-					    < 0) {
-						/* ERROR_HANDLING */
-						ERR("_vconf_check_value \
-						integrity (BOOL) Error");
-						ksDel(ks);
-						return -1;
-					}
-#ifdef ADDR_TRANS
-					if (changename_type) {
-						strncpy(orig_keyname +
-							changename_type,
-							keyName(k) +
-							(changename_type - 2),
-							BUF_LEN - 9);
-						vconf_keylist_add_bool(keylist,
-								       orig_keyname,
-								       atoi
-								       (get_value));
-					} else
-#endif
-						vconf_keylist_add_bool(keylist,
-								       keyName
-								       (k),
-								       atoi
-								       (get_value));
-					break;
-				case VCONF_TYPE_STRING:
-					get_value = keyValue(k);
-					if (_vconf_check_value_integrity
-					    (get_value,
-					     VCONF_TYPE_STRING) < 0) {
-						/* ERROR_HANDLING */
-						ERR("_vconf_check_value \
-						integrity (STR) Error");
-						ksDel(ks);
-						return -1;
-					}
-#ifdef ADDR_TRANS
-					if (changename_type) {
-						strncpy(orig_keyname +
-							changename_type,
-							keyName(k) +
-							(changename_type - 2),
-							BUF_LEN - 9);
-						vconf_keylist_add_str(keylist,
-								      orig_keyname,
-								      (char *)
-								      get_value);
-					} else
-#endif
-						vconf_keylist_add_str(keylist,
-								      keyName
-								      (k),
-								      (char *)
-								      get_value);
-					break;
-				default:
-					if (keyIsDir(k)) {
-#ifdef ADDR_TRANS
-						if (changename_type) {
-							strncpy(orig_keyname +
-								changename_type,
-								keyName(k) +
-								(changename_type
-								 - 2),
-								BUF_LEN - 9);
-							_vconf_keylist_add_dir
-							    (keylist,
-							     orig_keyname);
-						} else
-#endif
-							_vconf_keylist_add_dir
-							    (keylist,
-							     keyName(k));
-					}
-					/* else ERR("key(%s) has a value of 
-					   Unknown Type(%d)", 
-					   keyName(k), keyGetType(k)); */
-				}
-			}
-			ksDel(ks);
-			break;
-		}
-	default:
-		ERR("Key(%s) has Unknown Backend", in_parentDIR);
-	}
-	vconf_keylist_rewind(keylist);
-	END_TIME_CHECK return 0;
 }
 
-static void *_vconf_get_key_value(char *key, type_t type, int backend_type)
+API int vconf_get(keylist_t *keylist, const char *dirpath, get_option_t option)
 {
-	int error_loop_cnt = 0;
-	Key *k;
-	const void *get_value = NULL;
+	DIR *dir = NULL;
+	struct dirent entry;
+	struct dirent *result = NULL;
+	char full_file_path[KEY_PATH] = {0,};
+	char file_path[KEY_PATH] = {0,};
+	char full_path[KEY_PATH] = {0,};
+	char err_buf[ERR_LEN] = {0,};
+	int rc = 0;
+	int func_ret = 0;
+	int ret = 0;
+	int is_dir = 0;
+	int prefix = 0;
 
-	char key_path[PATH_MAX] = {0,};
-	void* return_value = NULL;
-	int val_len = 0;
+	keynode_t *temp_keynode;
 
-	if(key == NULL)
-		return NULL;
+	retvm_if(keylist == NULL, VCONF_ERROR, "Invalid argument: keylist is null");
+	retvm_if(dirpath == NULL, VCONF_ERROR, "Invalid argument: dirpath is null");
 
- error_retry:
-	error_loop_cnt++;
-	if (error_loop_cnt == MAX_ERROR_LOOP_CNT + 1) {
-		ERR("_vconf_get_key_value : Retry %d times in error handler", error_loop_cnt - 1);
-		return NULL;
-	} else if(error_loop_cnt > 2) {
-		usleep(ERROR_LOOP_SLEEP_TIME);
-	} else if (error_loop_cnt == 2) {
-		switch(backend_type) {
-			case VCONF_BACKEND_DB:
-				snprintf(key_path, PATH_MAX, "%s/%s", KDB_USER_DIR, key);
-				break;
-			case VCONF_BACKEND_FILE:
-				snprintf(key_path, PATH_MAX, "%s/%s", KDB_SYSTEM_DIR, key);
-				break;
-			case VCONF_BACKEND_MEMORY:
-				snprintf(key_path, PATH_MAX, "%s/%s", KDB_MEMORY_DIR, key);
-				break;
-			default:
-				ERR("_vconf_get_key_value : Invalid argument(wrong prefix(%d) of key)", type);
-				return NULL;
+	temp_keynode = _vconf_keylist_headnode(keylist);
+
+	if ((NULL != temp_keynode) && (VCONF_GET_KEY != option)) {
+		ERR("Not support mode : Only VCONF_GET_KEY \
+		option support To retrieve key with keylist");
+		return VCONF_ERROR;
+	}
+
+	if(temp_keynode != NULL) {
+		while(_vconf_keynode_next(temp_keynode)) {
+			temp_keynode = _vconf_keynode_next(temp_keynode);
+		}
+	}
+
+	ret = _vconf_get_key_path(dirpath, full_path);
+	retvm_if(ret != VCONF_OK, ret, "Invalid argument: key is not valid");
+
+
+	ret = _vconf_get_key_prefix(dirpath, &prefix);
+	retv_if(ret != VCONF_OK, ret);
+
+	if(prefix == VCONF_BACKEND_DB) {
+		_vconf_db_begin_transaction();
+	}
+
+	is_dir = _vconf_path_is_dir(full_path);
+	if(is_dir == 1) {
+		if((dir=opendir(full_path)) == NULL) {
+			strerror_r(errno, err_buf, ERR_LEN);
+			ERR("ERROR : open directory(%s) fail(%s)", dirpath, err_buf);
+			return VCONF_ERROR;
 		}
 
-		if(access(key_path, F_OK) != 0) {
-			if (errno == ENOENT) {
-				ERR("_vconf_get_key_value : Key does not exist: %s", key);
-				return NULL;
+		if((readdir_r(dir, &entry, &result)) != 0) {
+			closedir(dir);
+			strerror_r(errno, err_buf, ERR_LEN);
+			ERR("ERROR : read directory(%s) fail(%s)", dirpath, err_buf);
+			func_ret = VCONF_ERROR;
+		}
+
+		while(result != NULL)
+		{
+			if(( strcmp( entry.d_name, ".") == 0 ) || ( strcmp( entry.d_name, "..") == 0 )) {
+		            goto NEXT;
 			}
-		}
 
-		usleep(ERROR_LOOP_SLEEP_TIME);
-	}
+			keynode_t* keynode = _vconf_keynode_new();
+			if(keynode == NULL) {
+				closedir(dir);
+				ERR("Invalid argument: key malloc fail");
+				return VCONF_ERROR;
+			}
 
-	k = _vconf_kdb_get(key);
-	if (k == NULL) {
-		ERR("_vconf_get_key_value : kdb Get(%s) failed", key);
-		goto error_retry;
-	}
+			snprintf(file_path, KEY_PATH, "%s/%s", dirpath, entry.d_name);
+			snprintf(full_file_path, KEY_PATH, "%s/%s", full_path, entry.d_name);
 
-	if (keyGetType(k) == type) {
-		if (type == VCONF_TYPE_STRING) {
-			get_value = takeout_keyValue(k);
-		} else {
-			get_value = keyValue(k);
-		}
+			rc = _vconf_path_is_dir(full_file_path);
+			if(rc != VCONF_ERROR) {
+				if(rc == 1) {
+					/* directory */
+					if(option == VCONF_GET_KEY) {
+						goto NEXT;
+					} else {
+						_vconf_keynode_set_keyname(keynode, file_path);
+						_vconf_keynode_set_dir(keynode);
+					}
+				} else {
+					_vconf_keynode_set_keyname(keynode, file_path);
+					_vconf_get_key(keynode);
+				}
 
-		if (_vconf_check_value_integrity(get_value, type) < 0) {
-			keyDel(k);
-			get_value = NULL;
-			goto error_retry;
-		}
-
-		return_value = NULL;
-
-		if(strlen(get_value) == 0) {
-			return_value = get_value;
-		} else {
-			val_len = strlen(get_value)+1;
-			return_value = malloc(val_len);
-			if(return_value != NULL) {
-				memset(return_value, 0x00, val_len);
-				memcpy(return_value, get_value, val_len-1);				
+				if (keylist->head && temp_keynode != NULL)
+				{
+					temp_keynode->next = keynode;
+					temp_keynode = _vconf_keynode_next(temp_keynode);
+				}
+				else {
+					keylist->head = keynode;
+					temp_keynode = keylist->head;
+				}
+				keylist->num += 1;
 			} else {
-				ERR("_vconf_get_key_value : malloc fail");
+				_vconf_keynode_free(keynode);
+
+				memset(err_buf, 0x00, sizeof(err_buf));
+				strerror_r(errno, err_buf, sizeof(err_buf));
+				ERR("ERROR : get path(%s) fail(%s)", file_path, err_buf);
+				func_ret = VCONF_ERROR;
+			}
+
+	NEXT:
+			if((readdir_r(dir, &entry, &result)) != 0) {
+				memset(err_buf, 0x00, sizeof(err_buf));
+				strerror_r(errno, err_buf, sizeof(err_buf));
+				ERR("ERROR : read directory(%s) fail(%s)", dirpath, err_buf);
+				func_ret = VCONF_ERROR;
 			}
 		}
 
-		keyDel(k);
+		if((closedir(dir)) != 0) {
+			memset(err_buf, 0x00, sizeof(err_buf));
+			strerror_r(errno, err_buf, sizeof(err_buf));
+			ERR("ERROR : close directory(%s) fail(%s)", dirpath, err_buf);
+			func_ret = VCONF_ERROR;
+		}
+	} else if(is_dir == 0) {
+		keynode_t* keynode = _vconf_keynode_new();
+		retvm_if(keynode == NULL, VCONF_ERROR, "Invalid argument: key malloc fail");
 
-		return return_value;
+		_vconf_keynode_set_keyname(keynode, dirpath);
+
+		_vconf_get_key(keynode);
+
+		if (keylist->head && temp_keynode != NULL) {
+			temp_keynode->next = keynode;
+			//temp_keynode = _vconf_keynode_next(temp_keynode);
+		} else {
+			keylist->head = keynode;
+			temp_keynode = keylist->head;
+		}
+		keylist->num += 1;
 	} else {
-		ERR("_vconf_get_key_value : vconf key type is not int.");
-		keyDel(k);
-		return NULL;
+		return VCONF_ERROR;
 	}
+	vconf_keylist_rewind(keylist);
+
+	if(prefix == VCONF_BACKEND_DB) {
+		if(func_ret == VCONF_ERROR) {
+			_vconf_db_rollback_transaction();
+		} else {
+			_vconf_db_commit_transaction();
+		}
+	}
+
+	return func_ret;
 }
 
 /*
@@ -1505,42 +1804,30 @@ static void *_vconf_get_key_value(char *key, type_t type, int backend_type)
  */
 API int vconf_get_int(const char *in_key, int *intval)
 {
-	START_TIME_CHECK char *key;
-	int backend_type;
-	void *value = NULL;
+	START_TIME_CHECK
 
-	retvm_if(intval == NULL, -1, "vconf_get_int : Invaild argument(%s) - intval is NULL", in_key);
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "vconf_get_int : Invalid argument - Key(%s) Backend is not valid", in_key);
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "vconf_get_int : Connection Fail(%s)", in_key);
+	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is null");
+	retvm_if(intval == NULL, VCONF_ERROR, "Invalid argument: output buffer is null");
 
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
+	int func_ret = VCONF_OK;
+	keynode_t* pKeyNode = _vconf_keynode_new();
+	retvm_if(pKeyNode == NULL, VCONF_ERROR, "key malloc fail");
 
-		value = _vconf_get_key_value(key, VCONF_TYPE_INT, backend_type);
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-		if (value != NULL) {
-			*intval = atoi(value);
-			free(value);
-		} else {
-			ERR("vconf_get_int : _vconf_get_key_value(%s) fail", in_key);
-			return -1;
-		}
+	_vconf_keynode_set_keyname(pKeyNode, in_key);
 
-		break;
-	default:
-		ERR("vconf_get_int : Key(%s) has Unknown Backend", in_key);
-		return -1;
+	if (_vconf_get_key(pKeyNode) != VCONF_OK) {
+		ERR("vconf_get_int(%d) : %s error", getpid(), in_key);
+		func_ret = VCONF_ERROR;
+	} else {
+		*intval = vconf_keynode_get_int(pKeyNode);
+		INFO("vconf_get_int(%d) : %s(%d) success", getpid(), in_key, *intval);
 	}
 
-	END_TIME_CHECK return 0;
+	_vconf_keynode_free(pKeyNode);
+
+	END_TIME_CHECK
+
+	return func_ret;
 }
 
 /*
@@ -1551,42 +1838,30 @@ API int vconf_get_int(const char *in_key, int *intval)
  */
 API int vconf_get_bool(const char *in_key, int *boolval)
 {
-	START_TIME_CHECK 
-	char *key;
-	int backend_type;
-	void *value = NULL;
+	START_TIME_CHECK
 
-	retvm_if(boolval == NULL, -1, "vconf_get_bool : Invaild argument(%s) - boolval is NULL", in_key);
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "vconf_get_bool : Invalid argument - Key(%s) Backend is not valid", in_key);
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "vconf_get_bool : Connection Fail(%s)", in_key);
+	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is null");
+	retvm_if(boolval == NULL, VCONF_ERROR, "Invalid argument: output buffer is null");
 
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
+	int func_ret = VCONF_OK;
+	keynode_t* pKeyNode = _vconf_keynode_new();
+	retvm_if(pKeyNode == NULL, VCONF_ERROR, "key malloc fail");
 
-		value = _vconf_get_key_value(key, VCONF_TYPE_BOOL, backend_type);
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-		if (value != NULL) {
-			*boolval = !!atoi(value);
-			free(value);
-		} else {
-			ERR("vconf_get_bool : _vconf_get_key_value(%s) fail", in_key);
-			return -1;
-		}
-		break;
-	default:
-		ERR("vconf_get_bool: Key(%s) has Unknown Backend", in_key);
+	_vconf_keynode_set_keyname(pKeyNode, in_key);
+
+	if (_vconf_get_key(pKeyNode) != VCONF_OK) {
+		ERR("vconf_get_bool(%d) : %s error", getpid(), in_key);
+		func_ret = VCONF_ERROR;
+	} else {
+		*boolval = vconf_keynode_get_bool(pKeyNode);
+		INFO("vconf_get_bool(%d) : %s(%d) success", getpid(), in_key, *boolval);
 	}
 
+	_vconf_keynode_free(pKeyNode);
+
 	END_TIME_CHECK
-	return 0;
+
+	return func_ret;
 }
 
 /*
@@ -1597,41 +1872,30 @@ API int vconf_get_bool(const char *in_key, int *boolval)
  */
 API int vconf_get_dbl(const char *in_key, double *dblval)
 {
-	START_TIME_CHECK char *key;
-	int backend_type;
-	void *value = NULL;
+	START_TIME_CHECK
 
-	retvm_if(dblval == NULL, -1, "vconf_get_dbl : Invaild argument(%s) - dblval is NULL)", in_key);
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "vconf_get_dbl : Invalid argument - Key(%s) Backend is not valid", in_key);
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "vconf_get_dbl : Connection Fail(%s)", in_key);
+	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is null");
+	retvm_if(dblval == NULL, VCONF_ERROR, "Invalid argument: output buffer is null");
 
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
+	int func_ret = VCONF_OK;
+	keynode_t* pKeyNode = _vconf_keynode_new();
+	retvm_if(pKeyNode == NULL, VCONF_ERROR, "key malloc fail");
 
-		value = _vconf_get_key_value(key, VCONF_TYPE_DOUBLE, backend_type);
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-		if (value != NULL) {
-			*dblval = atof(value);
-			free(value);
-		} else {
-			ERR("vconf_get_dbl : _vconf_get_key_value(%s) fail", in_key);
-			return -1;
-		}
-		break;
-	default:
-		ERR("vconf_get_dbl : Key(%s) has Unknown Backend", in_key);
+	_vconf_keynode_set_keyname(pKeyNode, in_key);
+
+	if (_vconf_get_key(pKeyNode) != VCONF_OK) {
+		ERR("vconf_get_dbl(%d) : %s error", getpid(), in_key);
+		func_ret = VCONF_ERROR;
+	} else {
+		*dblval = vconf_keynode_get_dbl(pKeyNode);
+		INFO("vconf_get_dbl(%d) : %s(%f) success", getpid(), in_key, *dblval);
 	}
-	
+
+	_vconf_keynode_free(pKeyNode);
+
 	END_TIME_CHECK
-	return 0;
+
+	return func_ret;
 }
 
 /*
@@ -1641,43 +1905,32 @@ API int vconf_get_dbl(const char *in_key, double *dblval)
  */
 API char *vconf_get_str(const char *in_key)
 {
-	START_TIME_CHECK 
-	char *key;
-	int backend_type;
-	void *value = NULL;
+	START_TIME_CHECK
+
+	retvm_if(in_key == NULL, NULL, "Invalid argument: key is null");
+
+	keynode_t* pKeyNode = _vconf_keynode_new();
+	retvm_if(pKeyNode == NULL, NULL, "key malloc fail");
+
+	_vconf_keynode_set_keyname(pKeyNode, in_key);
+
 	char *strval = NULL;
+	char *tempstr = NULL;
 
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, NULL,
-		 "vconf_get_str : Invalid argument - Key(%s) Backend is not valid", in_key);
-	retvm_if(-1 == check_connetion(backend_type, NULL), NULL,
-		 "vconf_get_str : Connection Fail(%s)", in_key);
-
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		value = _vconf_get_key_value(key, VCONF_TYPE_STRING, backend_type);
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-		if (value != NULL) {
-			if(strlen(value) == 0) {
-				INFO("vconf_get_str : _vconf_get_key_value(%s) is NULL string('')", in_key);
-			}	
-			strval = (char *)value;
-		} else {
-			ERR("vconf_get_str : _vconf_get_key_value(%s) is NULL", in_key);
-			return NULL;
-		}
-		break;
-	default:
-		ERR("vconf_get_str : Key(%s) has Unknown Backend", in_key);
+	if (_vconf_get_key(pKeyNode) != VCONF_OK) {
+		ERR("vconf_get_str(%d) : %s error", getpid(), in_key);
+	} else {
+		tempstr = vconf_keynode_get_str(pKeyNode);
+		if(tempstr)
+			strval = strdup(tempstr);
+		INFO("vconf_get_str(%d) : %s success", getpid(), in_key);
 	}
 
-	INFO("vconf_get_str : key(%s) is %s", in_key, strval);
-	END_TIME_CHECK return strval;
+	_vconf_keynode_free(pKeyNode);
+
+	END_TIME_CHECK
+
+	return strval;
 }
 
 /*
@@ -1687,48 +1940,34 @@ API char *vconf_get_str(const char *in_key)
  */
 API int vconf_unset(const char *in_key)
 {
-	/* START_TIME_CHECK */
-	char *key;
-	int backend_type;
-	int error_loop_cnt = 0;
+	START_TIME_CHECK
 
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: Backend is not valid");
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "Connection Fail(%s)", in_key);
+	char path[KEY_PATH] = {0,};
+	int ret = -1;
+	int err_retry = VCONF_ERROR_RETRY_CNT;
+	int func_ret = VCONF_OK;
 
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
+	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is null");
 
-		while (kdbRemove(g_kdb_handle, key)) {
-			if (error_loop_cnt == MAX_ERROR_LOOP_CNT) {
-				ERR("Retry %d times in error handler",
-				    error_loop_cnt);
-#ifdef ADDR_TRANS
-				if (key != in_key)
-					free(key);
-#endif
-				return -1;
-			} else {
-				usleep(ERROR_LOOP_SLEEP_TIME);
-				error_loop_cnt++;
-			}
+	ret = _vconf_get_key_path(in_key, path);
+	retvm_if(ret != VCONF_OK, VCONF_ERROR, "Invalid argument: key is not valid");
+
+	do {
+		ret = remove(path);
+		if(ret == -1) {
+			ERR("vconf_unset error(%d) : %s", errno, in_key);
+			func_ret = VCONF_ERROR;
+		} else {
+			func_ret = VCONF_OK;
+			break;
 		}
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-		break;
-	default:
-		ERR("Key(%s) has Unknown Backend", in_key);
-	}
+	} while(err_retry--);
 
-	INFO("%s End", in_key);
-	/* END_TIME_CHECK */
-	return 0;
+	INFO("vconf_unset success : %s", in_key);
+
+	END_TIME_CHECK
+
+	return func_ret;
 }
 
 /*
@@ -1738,161 +1977,140 @@ API int vconf_unset(const char *in_key)
  */
 API int vconf_unset_recursive(const char *in_dir)
 {
-	START_TIME_CHECK char *key;
-	int backend_type;
-	KeySet *ks;
-	Key *k;
-	int error_loop_cnt = 0;
+	START_TIME_CHECK
+
+	DIR *dir = NULL;
+	struct dirent entry;
+	struct dirent *result = NULL;
+	char fullpath[KEY_PATH] = {0,};
+	char dirpath[KEY_PATH] = {0,};
+	char err_buf[ERR_LEN] = {0,};
+	int rc = 0;
+	int func_ret = 0;
 	int ret = 0;
 
-	backend_type = trans_keyname(in_dir, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: Backend is not valid");
-	retvm_if(-1 == check_connetion(backend_type, NULL), -1,
-		 "Connection Fail(%s)", in_dir);
+	retvm_if(in_dir == NULL, VCONF_ERROR, "Invalid argument: dir path is null");
 
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		ks = ksNew(0);
-		ksAppendKey(ks, keyNew(key, KEY_END));
-		_vconf_get_recursive(&ks, key);
+	ret = _vconf_get_key_path(in_dir, dirpath);
+	retvm_if(ret != VCONF_OK, VCONF_ERROR, "Invalid argument: key is not valid");
 
-		if (ksGetSize(ks)) {
-			ksRewind(ks);
-			while (((k = ksNext(ks)) != 0)) {
-				DBG("recursive unset (%s)", 
-					keyName(k));
-				keyRemove(k);
-			}
-
-			while (kdbSet(g_kdb_handle, ks, 0, 0)) {
-				/* We got an error. Warn user. */
-				Key *problem;
-				char keyname[300] = "";
-
-				problem = ksCurrent(ks);
-				if (problem)
-					keyGetFullName(problem, keyname, sizeof(keyname));
-
-				DBG("kdbSet error: while removing %s. try %d times", 
-					keyname, error_loop_cnt+1);
-
-				/*
-				retry to unset failed keys for error count times
-				if unset key is failed for error count times 
-				try to set keys from the next key
-				unless we reached the end of KeySet
-				*/	
-				if (error_loop_cnt == MAX_ERROR_LOOP_CNT) {
-					ERR("kdbSet error: while removing %s. error will be returned", 
-						keyname);
-					ret = -1;
-					if (ksNext(ks) == 0)
-						break;
-				} else {
-					usleep(ERROR_LOOP_SLEEP_TIME);
-					error_loop_cnt++;
-				}
-			}
-		} else {
-			ERR("DIR(%s) has no keys or is not Unknown Directory name", 
-				in_dir);
-		}
-		
-		ksDel(ks);
-#ifdef ADDR_TRANS
-		if (key != in_dir)
-			free(key);
-#endif
-		break;
-	default:
-		ERR("Key(%s) has Unknown Backend", in_dir);
+	if((dir=opendir(dirpath)) == NULL) {
+		strerror_r(errno, err_buf, ERR_LEN);
+		ERR("ERROR : open directory(%s) fail(%s)", in_dir, err_buf);
+		return VCONF_ERROR;
 	}
 
-	DBG("unset recursive %s End", in_dir);
-	
-	END_TIME_CHECK 
-	return ret;
+	if((readdir_r(dir, &entry, &result)) != 0) {
+		strerror_r(errno, err_buf, ERR_LEN);
+		ERR("ERROR : read directory(%s) fail(%s)", in_dir, err_buf);
+		func_ret = VCONF_ERROR;
+	}
+
+	while(result != NULL)
+	{
+		if(( strcmp( entry.d_name, ".") == 0 ) || ( strcmp( entry.d_name, "..") == 0 )) {
+	            goto NEXT;
+		}
+
+		snprintf(fullpath,KEY_PATH, "%s/%s", dirpath, entry.d_name);
+
+		ret = _vconf_path_is_dir(fullpath);
+		if(ret != VCONF_ERROR) {
+			if(ret == 1) {
+				rc = vconf_unset_recursive(fullpath);
+				if(rc == VCONF_ERROR)
+					func_ret = VCONF_ERROR;
+			}
+
+			rc = remove(fullpath);
+			if(rc == -1) {
+				memset(err_buf, 0x00, sizeof(err_buf));
+				strerror_r(errno, err_buf, sizeof(err_buf));
+				ERR("ERROR : remove path(%s) fail(%s)", in_dir, err_buf);
+				func_ret = VCONF_ERROR;
+			}
+		} else {
+			memset(err_buf, 0x00, sizeof(err_buf));
+			strerror_r(errno, err_buf, sizeof(err_buf));
+			ERR("ERROR : remove path(%s) fail(%s)", in_dir, err_buf);
+			func_ret = VCONF_ERROR;
+		}
+NEXT:
+		if((readdir_r(dir, &entry, &result)) != 0) {
+			memset(err_buf, 0x00, sizeof(err_buf));
+			strerror_r(errno, err_buf, sizeof(err_buf));
+			ERR("ERROR : read directory(%s) fail(%s)", in_dir, err_buf);
+			func_ret = VCONF_ERROR;
+		}
+	}
+
+	if((closedir(dir)) != 0) {
+		memset(err_buf, 0x00, sizeof(err_buf));
+		strerror_r(errno, err_buf, sizeof(err_buf));
+		ERR("ERROR : close directory(%s) fail(%s)", in_dir, err_buf);
+		func_ret = VCONF_ERROR;
+	}
+#if 0
+	if(func_ret == VCONF_OK) {
+		if((remove(in_dir)) == -1) {
+			memset(err_buf, 0x00, sizeof(err_buf));
+			strerror_r(errno, err_buf, sizeof(err_buf));
+			ERR("ERROR : remove path(%s) fail(%s)", in_dir, err_buf);
+			func_ret = VCONF_ERROR;
+		}
+	}
+#endif
+
+	return func_ret;
 }
 
-API int vconf_notify_key_changed
-	(const char *in_key, vconf_callback_fn cb, void *user_data) {
-	/* START_TIME_CHECK */
-	int backend_type;
-	char *key;
+API int vconf_notify_key_changed(const char *in_key, vconf_callback_fn cb, void *user_data)
+{
+	START_TIME_CHECK
 
-	retvm_if(cb == NULL, -1, "Invalid argument: cb(%p)", cb);
+	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is null");
+	retvm_if(cb == NULL, VCONF_ERROR, "Invalid argument: cb(%p)", cb);
 
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: (%s)Backend is not valid", in_key);
-
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		if (_vconf_kdb_add_notify(backend_type, key, cb, user_data)) {
-			ERR("vconf_notify_key_changed : key(%s) add notify fail",
-			    in_key);
-#ifdef ADDR_TRANS
-			if (key != in_key)
-				free(key);
-#endif
-			return -1;
-		}
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-		break;
-	default:
-		ERR("vconf_notify_key_changed : Key(%s) has Unknown Backend", in_key);
+	if (_vconf_kdb_add_notify(in_key, cb, user_data)) {
+		ERR("vconf_notify_key_changed : key(%s) add notify fail", in_key);
+		return VCONF_ERROR;
 	}
 
 	INFO("vconf_notify_key_changed : %s noti is added", in_key);
 
-	/* END_TIME_CHECK */
-	return 0;
+	END_TIME_CHECK
+
+	return VCONF_OK;
 }
 
 API int vconf_ignore_key_changed(const char *in_key, vconf_callback_fn cb)
 {
-	/* START_TIME_CHECK */
-	int backend_type;
-	char *key;
+	START_TIME_CHECK
 
-	retvm_if(cb == NULL, -1, "Invalid argument: cb(%p)", cb);
+	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is null");
+	retvm_if(cb == NULL, VCONF_ERROR, "Invalid argument: cb(%p)", cb);
 
-	backend_type = trans_keyname(in_key, &key);
-	retvm_if(backend_type == VCONF_BACKEND_NULL, -1,
-		 "Invalid argument: (%s)Backend is not valid", in_key);
-
-	switch (backend_type) {
-	case VCONF_BACKEND_DB:
-	case VCONF_BACKEND_FILE:
-	case VCONF_BACKEND_MEMORY:
-		if (_vconf_kdb_del_notify(backend_type, key, cb)) {
-			ERR("vconf_ignore_key_changed() failed: key(%s)",
-			    in_key);
-#ifdef ADDR_TRANS
-			if (key != in_key)
-				free(key);
-#endif
-			return -1;
-		}
-#ifdef ADDR_TRANS
-		if (key != in_key)
-			free(key);
-#endif
-		break;
-	default:
-		ERR("Key(%s) has Unknown Backend", in_key);
+	if (_vconf_kdb_del_notify(in_key, cb)) {
+		ERR("vconf_ignore_key_changed() failed: key(%s)", in_key);
+		return VCONF_ERROR;
 	}
 
 	INFO("vconf_ignore_key_changed : %s noti removed", in_key);
-	/* END_TIME_CHECK */
+
+	END_TIME_CHECK
+
+	return VCONF_OK;
+}
+
+API mode_t vconf_set_permission(mode_t mode)
+{
+	/* TODO: implement! */
+	return mode;
+}
+
+API int vconf_set_key_permission(const char *in_key, const mode_t mode)
+{
+	/* TODO: implement! */
 	return 0;
 }
 

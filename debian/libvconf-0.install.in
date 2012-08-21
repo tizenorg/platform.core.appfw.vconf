@@ -1,4 +1,0 @@
-@PREFIX@/lib/*.so.*
-@PREFIX@/bin/vconftool
-/opt/var/kdb/kdb_first_boot
-/etc/rc.d/init.d/vconf-init

@@ -2,9 +2,7 @@
 /unit/utc_ApplicationFW_vconf_set_bool_func
 /unit/utc_ApplicationFW_vconf_set_str_func
 /unit/utc_ApplicationFW_vconf_set_dbl_func
-/unit/utc_ApplicationFW_vconf_set_bytes_func
 /unit/utc_ApplicationFW_vconf_get_bool_func
-/unit/utc_ApplicationFW_vconf_get_bytes_func
 /unit/utc_ApplicationFW_vconf_get_dbl_func
 /unit/utc_ApplicationFW_vconf_get_int_func
 /unit/utc_ApplicationFW_vconf_get_str_func
@@ -28,7 +26,6 @@
 /unit/utc_ApplicationFW_vconf_keylist_free_func
 /unit/utc_ApplicationFW_vconf_keylist_lookup_func
 /unit/utc_ApplicationFW_vconf_keylist_rewind_func
-/unit/utc_ApplicationFW_vconf_keynode_steal_str_func
 /unit/utc_ApplicationFW_vconf_set_func
 /unit/utc_ApplicationFW_vconf_keylist_new_func
 /unit/utc_ApplicationFW_vconf_sync_key_func

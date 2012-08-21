@@ -94,30 +94,49 @@ extern "C" {
  * \n Use for vconf_get()
  * @see vconf_get()
  */
-	enum get_option_t {
-		VCONF_GET_KEY = 0,
-		    /**< get only keys */
-		VCONF_GET_ALL,
-		    /**< get keys and directorys */
-		VCONF_GET_DIR
-		   /**< get only directorys */
-	};
-	typedef enum get_option_t get_option_t;
+enum get_option_t {
+	VCONF_GET_KEY = 0,
+	    /**< get only keys */
+	VCONF_GET_ALL,
+	    /**< get keys and directorys */
+	VCONF_GET_DIR
+	   /**< get only directorys */
+};
+typedef enum get_option_t get_option_t;
 
-	enum vconf_t {
-		VCONF_TYPE_NONE = 0,
-			   /**< Vconf none type for Error detection */
-		VCONF_TYPE_STRING = 40,
-			   /**< Vconf string type */
-		VCONF_TYPE_INT = 41,
-			   /**< Vconf integer type */
-		VCONF_TYPE_DOUBLE = 42,
-			   /**< Vconf double type */
-		VCONF_TYPE_BOOL = 43,
-			   /**< Vconf boolean type */
-		VCONF_TYPE_DIR
-			   /**< Vconf directory type */
-	};
+enum vconf_t {
+	VCONF_TYPE_NONE = 0,
+		   /**< Vconf none type for Error detection */
+	VCONF_TYPE_STRING = 40,
+		   /**< Vconf string type */
+	VCONF_TYPE_INT = 41,
+		   /**< Vconf integer type */
+	VCONF_TYPE_DOUBLE = 42,
+		   /**< Vconf double type */
+	VCONF_TYPE_BOOL = 43,
+		   /**< Vconf boolean type */
+	VCONF_TYPE_DIR
+		   /**< Vconf directory type */
+};
+
+
+/**
+ * keynode_t is an opaque type, it must be
+ * used via accessor functions.
+ * @see vconf_keynode_get_name(), vconf_keynode_get_type()
+ * @see vconf_keynode_get_bool(), vconf_keynode_get_dbl(), vconf_keynode_get_int(), vconf_keynode_get_str()
+ */
+typedef struct _keynode_t {
+	char *keyname;
+	int type;
+	union {
+		int i;
+		int b;
+		double d;
+		char *s;
+	} value;
+	struct _keynode_t *next;
+} keynode_t;
 
 /**
  * keylist_t is an opaque type, it must be
@@ -127,16 +146,12 @@ extern "C" {
  * @see vconf_keylist_del(), vconf_keylist_add_null()
  * @see vconf_keylist_lookup(), vconf_keylist_nextnode(), vconf_keylist_rewind()
  */
-	typedef struct _keylist_t keylist_t;
+typedef struct _keylist_t {
+	int num;
+	keynode_t *head;
+	keynode_t *cursor;
+} keylist_t;
 
-/**
- * keynode_t is an opaque type, it must be
- * used via accessor functions.
- * @see vconf_keynode_get_name(), vconf_keynode_get_type()
- * @see vconf_keynode_get_bool(), vconf_keynode_get_dbl(), vconf_keynode_get_int(), vconf_keynode_get_str()
- * @see vconf_keynode_steal_str()
- */
-	typedef struct _keynode_t keynode_t;
 
 /**
  * This is the signature of a callback function added with vconf_notify_key_changed().
@@ -215,17 +230,6 @@ extern "C" {
  */
 	char *vconf_keynode_get_str(keynode_t *keynode);
 
-/**
- * This function steals String value from the keynode,
- * leaving the string value field in keynode set to NULL.
- * @param[in] keynode The Key
- * @return String value that the caller must free, NULL on error
- * @pre Nome
- * @post None
- * @remarks None
- * @see vconf_notify_key_changed(), vconf_keynode_get_name, vconf_keynode_get_bool, vconf_keynode_get_type, vconf_keynode_get_str, vconf_keynode_get_int, vconf_keynode_get_dbl, keynode_t, vconf_t
- */
-	char *vconf_keynode_steal_str(keynode_t *keynode);
 
 /************************************************
  * keylist handling APIs
@@ -253,9 +257,10 @@ extern "C" {
  * @par example
  * @code
     int r =0;
+    keylist_t* pKeyList = NULL;
     pKeyList = vconf_keylist_new();
-    
-    r = vconf_get(pKeyList, KEY_PARENT, VCONF_GET_KEY); 
+
+    r = vconf_get(pKeyList, KEY_PARENT, VCONF_GET_KEY);
     if (r) {
 	tet_infoline("vconf_get() failed in positive test case");
 	tet_result(TET_FAIL);
@@ -266,13 +271,13 @@ extern "C" {
     vconf_keylist_nextnode(pKeyList);
 
     // Move first position from KeyList
-    r = vconf_keylist_rewind(pKeyList);	
-    if (r<0) { 
+    r = vconf_keylist_rewind(pKeyList);
+    if (r<0) {
 	tet_infoline("vconf_keylist_rewind() failed in positive test case");
 	tet_result(TET_FAIL);
 	return;
     }
-    
+
     while(vconf_keylist_nextnode(pKeyList)) ;
  * @endcode
  */
@@ -306,13 +311,14 @@ extern "C" {
 #include <vconf.h>
 
 int main()
-{	
-	int r = 0;	
+{
+	int r = 0;
 	int nResult = 0;
-	keynode_t* pKeyNode = NULL;
+	keylist_t* pKeyList = NULL;
+	keynode_t *pKeyNode;
 
 	pKeyList = vconf_keylist_new();
-	r = vconf_get(pKeyList, KEY_PARENT, VCONF_GET_KEY);	
+	r = vconf_get(pKeyList, KEY_PARENT, VCONF_GET_KEY);
 	if (r<0) {
 		printf("vconf_get() failed in positive test case");
 		return -1;
@@ -331,7 +337,7 @@ int main()
 		return -1;
 
 	}
-	
+
 	vconf_keylist_free(pKeyList);
 	return 0;
 }
@@ -493,7 +499,7 @@ int main()
  * @pre None
  * @post None
  * @remarks None
- * @see vconf_set_bool(), vconf_set_dbl(), vconf_set_str(), vconf_set_bytes()
+ * @see vconf_set_bool(), vconf_set_dbl(), vconf_set_str()
  */
 	int vconf_set_int(const char *in_key, const int intval);
 
@@ -505,7 +511,7 @@ int main()
  * @pre None
  * @post None
  * @remarks None
- * @see vconf_set_int(), vconf_set_dbl(), vconf_set_str(), vconf_set_bytes()
+ * @see vconf_set_int(), vconf_set_dbl(), vconf_set_str()
  * @par example
  * @code
 #include <stdio.h>
@@ -541,7 +547,7 @@ int main()
  * @pre None
  * @post None
  * @remarks None
- * @see vconf_set_int(), vconf_set_bool(), vconf_set_str(), vconf_set_bytes()
+ * @see vconf_set_int(), vconf_set_bool(), vconf_set_str()
  */
 	int vconf_set_dbl(const char *in_key, const double dblval);
 
@@ -553,7 +559,7 @@ int main()
  * @pre None
  * @post None
  * @remarks None
- * @see vconf_set_bool(), vconf_set_dbl(), vconf_set_int(), vconf_set_bytes()
+ * @see vconf_set_bool(), vconf_set_dbl(), vconf_set_int()
  */
 	int vconf_set_str(const char *in_key, const char *strval);
 
@@ -571,7 +577,7 @@ int main()
  * @par example
  * @code
 #include <stdio.h>
-#include <vconf.h> 
+#include <vconf.h>
 
 int main()
 {
@@ -612,23 +618,22 @@ int main()
 }
  * @endcode
  */
-	int vconf_get(keylist_t *keylist, const char *in_parentDIR,
-		      get_option_t option);
+	int vconf_get(keylist_t *keylist, const char *in_parentDIR, get_option_t option);
 
 /**
  * This function get the integer value of given key.
- * 
+ *
  * @param[in]	in_key	key
  * @param[out]	intval output buffer
  * @return 0 on success, -1 on error
  * @pre None
  * @post None
  * @remkar None
- * @see vconf_get_bool, vconf_get_dbl, vconf_get_str, vconf_get_bytes
+ * @see vconf_get_bool, vconf_get_dbl, vconf_get_str
  * @par example
  * @code
 #include <stdio.h>
-#include <vconf.h> 
+#include <vconf.h>
 
 const char *key1_name="db/test/key1";
 
@@ -660,19 +665,19 @@ int main(int argc, char **argv)
  * @pre None
  * @post None
  * @remarks None
- * @see vconf_get_int(), vconf_get_dbl(), vconf_get_str(), vconf_get_bytes()
+ * @see vconf_get_int(), vconf_get_dbl(), vconf_get_str()
  */
 	int vconf_get_bool(const char *in_key, int *boolval);
 
 /**
- * This function get the double value of given key. 
+ * This function get the double value of given key.
  * @param[in]	in_key	key
  * @param[out]	dblval output buffer
  * @return 0 on success, -1 on error
  * @pre None
  * @post None
  * @remarks None
- * @see vconf_get_int(), vconf_get_bool(), vconf_get_str(), vconf_get_bytes()
+ * @see vconf_get_int(), vconf_get_bool(), vconf_get_str()
  */
 	int vconf_get_dbl(const char *in_key, double *dblval);
 
@@ -684,7 +689,7 @@ int main(int argc, char **argv)
  * @pre None
  * @post None
  * @remarks None
- * @see vconf_get_int(), vconf_get_dbl(), vconf_get_bool(), vconf_get_bytes()
+ * @see vconf_get_int(), vconf_get_dbl(), vconf_get_bool()
  * @par example
  * @code
    #include <stdio.h>
@@ -760,7 +765,7 @@ int main(int argc, char **argv)
  * When you have a callback for a certain key, assume that two or more processes are trying to
  * change the value of the key competitively. In this case, your callback function will always
  * get 'CURRENT' value, not the value raised the notify that caused run of the callback.  So,
- * do not use vconf callback when competitive write for a key is happening. In such case, use 
+ * do not use vconf callback when competitive write for a key is happening. In such case, use
  * socket-based IPC(dbus or something else) instead.
  *
  * @param[in]   in_key  key
@@ -832,32 +837,6 @@ int main(int argc, char **argv)
  * @see vconf_notify_key_changed()
  */
 	int vconf_ignore_key_changed(const char *in_key, vconf_callback_fn cb);
-
-/**
- * This function get the binary value of given key up to size bytes.
- * @param[in]	in_key	key
- * @param[out]	buf output buffer
- * @param[in]  size the size for reading
- * @return the number of bytes actually read on success, -1 on error
- * @pre None
- * @post None
- * @remarks None
- * @see vconf_get_int(), vconf_get_bool(), vconf_get_str(), vconf_get_dbl()
- **/
-	int vconf_get_bytes(const char *in_key, void *buf, int size);
-
-/**
- * This function set the binary value of given key
- * @param[in]	in_key	key
- * @param[in]	binval binary value to set
- * @param[in]  size  the size for writing
- * @return 0 on success, -1 on error
- * @pre None
- * @post None
- * @remarks None
- * @see vconf_set_int(), vconf_set_bool(), vconf_set_str(), vconf_set_dbl()
- */
-	int vconf_set_bytes(const char *in_key, const void *binval, int size);
 
 #ifdef __cplusplus
 }

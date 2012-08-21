@@ -31,67 +31,35 @@
 #ifndef __VCONF_GCONF_H__
 #define __VCONF_GCONF_H__
 
-#include <kdb.h>
 #include "vconf-log.h"
+#include "vconf.h"
 
-/* #define KER_VER_CHECK */
 #define BACKEND_DB_PREFIX "db/"
 #define BACKEND_FILE_PREFIX "file/"
 #define BACKEND_MEMORY_PREFIX "memory/"
-#define BACKEND_GCONF_LOCAL_PREFIX "gconf_l/"
-#define BACKEND_GCONF_DAEMON_PREFIX "gconf_d/"
+
+#define BACKEND_SYSTEM_DIR "/opt/var/kdb/"
+#define BACKEND_MEMORY_DIR "/var/run/"
 
 #define BUF_LEN (1024)
-#define CALLBACK_MAX (64)
-
-typedef struct _keynode_t {
-	char *keyname;
-	int type;
-	union {
-		int i;
-		int b;
-		double d;
-		char *s;
-	} value;
-	struct _keynode_t *next;
-} keynode_t;
-
-typedef struct _keylist_t {
-	int num;
-	keynode_t *head;
-	keynode_t *cursor;
-} keylist_t;
-
-/*This is a callback function pointer signature*/
-typedef void (*cb_func) (void *user_data);
-
-/*This is a callback function pointer signature for value return*/
-typedef void (*vconf_callback_fn) (keynode_t *node, void *user_data);
-
-typedef struct {
-	char *key;
-	vconf_callback_fn cb;
-	void *cb_data;
-	unsigned int extra_num;
-} callback_node_t;
+#define KEY_PATH (128)
+#define ERR_LEN (128)
 
 enum {
 	VCONF_BACKEND_NULL = 0,
-	VCONF_BACKEND_GCONF_D,
-	VCONF_BACKEND_GCONF_L,
 	VCONF_BACKEND_DB,
 	VCONF_BACKEND_FILE,
-	VCONF_BACKEND_MEMORY,
+	VCONF_BACKEND_MEMORY
 };
 
+#if 0
 enum {
 	VCONF_TYPE_NONE = 0,
-	VCONF_TYPE_BINARY = 20,
 	VCONF_TYPE_STRING = 40,	/*KEY_TYPE_STRING of KDB is 40 */
 	VCONF_TYPE_INT = 41,
 	VCONF_TYPE_DOUBLE = 42,
 	VCONF_TYPE_BOOL = 43,
-	VCONF_TYPE_DIR,
+	VCONF_TYPE_DIR
 };
 
 typedef int get_option_t;
@@ -101,11 +69,33 @@ enum {
 	VCONF_GET_DIR,
 };
 
-typedef int cb_handle_t;
+/*This is a callback function pointer signature for value return*/
+typedef void (*vconf_callback_fn) (keynode_t *node, void *user_data);
+
+#endif
+
+
+
+#define VCONF_OK                 0
+#define VCONF_ERROR              -1
+
 enum {
-	VCONF_GLIB_LOOP,
-	VCONF_ECORE_LOOP
+	VCONF_ERROR_WRONG_PREFIX = 1,
+	VCONF_ERROR_WRONG_TYPE,
+	VCONF_ERROR_WRONG_VALUE,
+	VCONF_ERROR_NO_MEM,
+	VCONF_ERROR_FILE_OPEN = 11,
+	VCONF_ERROR_FILE_FREAD,
+	VCONF_ERROR_FILE_FGETS,
+	VCONF_ERROR_FILE_WRITE,
+	VCONF_ERROR_FILE_SYNC,
+	VCONF_ERROR_FILE_CLOSE,
+	VCONF_ERROR_FILE_ACCESS,
+	VCONF_ERROR_FILE_CHMOD,
+	VCONF_ERROR_FILE_LOCK
 };
+
+#define return_err(err) return 0-err;
 
 /* Error codes retunred by the configuration manager */
 #if 0
@@ -122,7 +112,7 @@ typedef enum {
 	VCONF_ERROR_NO_PERMISSION = 3,
 	/* Address couldn't be resolved */
 	VCONF_ERROR_BAD_ADDRESS = 4,
-	/* directory or key isn't valid 
+	/* directory or key isn't valid
 	   (contains bad characters, or malformed slash arrangement) */
 	VCONF_ERROR_BAD_KEY = 5,
 	/* Syntax error when parsing */
@@ -176,22 +166,17 @@ typedef enum {
 } SLP_Setting_Error;
 #endif
 
-/*************** Elecktra ****************/
-#define KDB_USER_DIR "/opt/var/kdb"
-#define KDB_SYSTEM_DIR "/opt/var/kdb"
-#define KDB_MEMORY_DIR "/var/run"
-
-int _vconf_set_empty(const char *key);
-Key *_vconf_kdb_get(const char *key);
 int _vconf_kdb_add_notify
-	(int backend_type, const char *keyname, vconf_callback_fn cb, void *data);
+	(const char *keyname, vconf_callback_fn cb, void *data);
 int _vconf_kdb_del_notify
-	(int backend_type, const char *keyname, vconf_callback_fn cb);
+	(const char *keyname, vconf_callback_fn cb);
 
-#define KDB_OPEN_HANDLE \
-	do {\
-		if (g_kdb_handle == NULL)\
-		g_kdb_handle = kdbOpen();\
-	} while (0)
+int _vconf_get_key_path(const char *keyname, char *path);
+int _vconf_get_key(keynode_t *keynode);
+
+int _vconf_keynode_set_keyname(keynode_t *keynode, const char *keyname);
+inline void _vconf_keynode_set_null(keynode_t *keynode);
+inline keynode_t *_vconf_keynode_new(void);
+inline void _vconf_keynode_free(keynode_t *keynode);
 
 #endif

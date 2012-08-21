@@ -46,3 +46,7 @@ ADD_DEFINITIONS("-Wstrict-overflow=5")          # Also warn about cases where th
 #ADD_DEFINITIONS("-Winline")                     # Warn if a function can not be inlined and it was declared as inline.
 ADD_DEFINITIONS("-Wdisabled-optimization")      # Warn if a requested optimization pass is disabled.
 
+
+
+add_executable(test-vconf-headers test-vconf-headers.c)
+

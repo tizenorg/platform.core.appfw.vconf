@@ -1,7 +1,0 @@
-vconf (0.2.23-1) unstable; urgency=low
-
-  * Initial Release.
-  * Git: pkgs/l/libslp-setting
-  * Tag: vconf_0.2.23-1
-
- -- Hyungdeuk Kim <hd3.kim@samsung.com>  Tue, 07 Dec 2011 13:56:20 +0900

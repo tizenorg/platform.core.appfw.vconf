@@ -31,6 +31,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
+#include <errno.h>
+
+#include <wordexp.h>
 
 enum {
 	VCONFTOOL_TYPE_NO = 0x00,
@@ -41,9 +44,6 @@ enum {
 };
 
 #define BUFSIZE		1024
-
-const int SHARED_PERM = 0664;
-const int USER_PERM = 0644;
 
 const char *BACKEND_DB_PREFIX = "db/";
 const char *BACKEND_FILE_PREFIX = "file/";
@@ -150,6 +150,151 @@ static int check_type(void)
 	return VCONFTOOL_TYPE_NO;
 }
 
+static int __system(char * cmd)
+{
+	int status;
+	pid_t cpid;
+
+	if((cpid = fork()) < 0) {
+		perror("fork");
+		return -1;
+	}
+
+	if (cpid == 0) {
+		/* child */
+		wordexp_t p;
+		char **w;
+
+		wordexp(cmd, &p, 0);
+		w = p.we_wordv;
+
+		execv(w[0], (char *const *)w);
+
+		wordfree(&p);
+
+		_exit(-1);
+	} else {
+		/* parent */
+		if (waitpid(cpid, &status, 0) == -1) {
+			perror("waitpid failed");
+			return -1;
+		}
+		if (WIFSIGNALED(status)) {
+			printf("signal(%d)\n", WTERMSIG(status));
+			perror("exit by signal");
+			return -1;
+		}
+		if (!WIFEXITED(status)) {
+			perror("exit abnormally");
+			return -1;
+		}
+		if (WIFEXITED(status) && WEXITSTATUS(status)) {
+			perror("child return error");
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+static void disable_invalid_char(char* src)
+{
+	char* tmp;
+
+	for(tmp = src; *tmp; ++tmp)
+	{
+		if( (*tmp == ';') || (*tmp == '|') )
+		{
+			fprintf(stderr,"invalid char is found\n");
+			*tmp = '_';
+		}
+	}
+}
+
+static int check_file_path_mode(char* file_path)
+{
+	char szCmd[BUFSIZE] = {0,};
+	int create_file = 0;
+	int set_id = 0;
+	int fd;
+
+	if (guid || uid) {
+		if (getuid() != 0) {
+			fprintf(stderr,
+				"Error!\t Only root user can use '-g or -u' option\n");
+			return -1;
+		}
+
+		set_id = 1;
+	}
+
+	/* Check file path */
+	if (access(file_path, F_OK) != 0) {
+		/* fprintf(stderr,"key does not exist\n"); */
+
+		char szPath[BUFSIZE] = { 0, };
+		char *pCh = strrchr(file_path, '/');
+		strncat(szPath, file_path, pCh - file_path);
+		/* fprintf(stderr, "szPath : %s\n", szPath); */
+
+		/* Check directory & create it */
+		if (access(szPath, F_OK) != 0) {
+			/* fprintf(stderr,"parent dir does not exist\n"); */
+
+			snprintf(szCmd, BUFSIZE, "/bin/mkdir %s -p --mode=755", szPath);
+			disable_invalid_char(szCmd);
+			if (__system(szCmd)) {
+				fprintf(stderr,"Fail mkdir() szCmd=%s\n", __FILE__, __LINE__, szCmd);
+				return -1;
+			}
+
+		}
+
+		create_file = 1;
+	} else if (!is_forced) {
+		fprintf(stderr, "Key already exist. Use -f option to force update\n");
+		return -1;
+	}
+
+	if(create_file) {
+		/* Create file */
+		mode_t temp;
+		temp = umask(0000);
+		fd = open(file_path, O_RDWR|O_CREAT, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
+		umask(temp);
+		if(fd == -1) {
+			fprintf(stderr, "open(rdwr,create) error\n");
+			return -1;
+		}
+		close(fd);
+	}
+
+	if(set_id) {
+		if((fd = open(file_path, O_RDONLY)) == -1) {
+			fprintf(stderr, "open(rdonly) error\n");
+			return -1;
+		}
+
+		if(uid) {
+			if (fchown(fd, atoi(uid), atoi(uid)) == -1) {
+				fprintf(stderr, "Error!\t Fail to fchown(%d)\n", errno);
+				close(fd);
+				return -1;
+			}
+		} else if (guid) {
+			if (-1 == fchown(fd, 0, atoi(guid))) {
+				fprintf(stderr, "Error!\t Fail to fchown()\n");
+				close(fd);
+				return -1;
+			}
+		}
+
+		close(fd);
+	}
+
+	return 0;
+}
+
 static int copy_memory_key(char *pszKey, char *pszOrigin)
 {
 	char szCmd[BUFSIZE] = { 0, };
@@ -237,79 +382,39 @@ int main(int argc, char **argv)
 			print_help(argv[0]);
 			return 1;
 		}
-#ifdef VCONF_TIMECHECK
-		struct timeval tv;
 
-		gettimeofday(&tv, NULL);
-		printf("\x1b[105;37m[VConftool]\x1b[0m %d.%6d\n",
-		       (int)tv.tv_sec, (int)tv.tv_usec);
-#endif
-
-		/*  Start DAC  *************************************/
-		if (guid || uid) {
-			if (0 != getuid()) {
-				fprintf(stderr,
-					"Error!\t Only root user can use '-g or -u' option\n");
-				return -1;
-			}
-			if (guid) {
-				/* TODO; digit check */
-				group_id = atoi(guid);
-			}
-			if (uid) {
-				user_id = atoi(uid);
-			}
-
-		}
 		if (make_file_path(argv[2], szFilePath)) {
 			fprintf(stderr, "Error!\t Bad prefix\n");
 			return -1;
 		}
 
-		/*  End DAC  ****************************************/
+		if (check_file_path_mode(szFilePath)) {
+			fprintf(stderr, "Error!\t create key %s\n", argv[2]);
+			return -1;
+		}
 
 		switch (set_type) {
-		case VCONFTOOL_TYPE_STRING:
-			vconf_set_str(argv[2], argv[3]);
-			break;
-		case VCONFTOOL_TYPE_INT:
-			vconf_set_int(argv[2], atoi(argv[3]));
-			break;
-		case VCONFTOOL_TYPE_DOUBLE:
-			vconf_set_dbl(argv[2], atof(argv[3]));
-			break;
-		case VCONFTOOL_TYPE_BOOL:
-			vconf_set_bool(argv[2], !!atoi(argv[3]));
-			break;
-
-		default:
-			fprintf(stderr, "never reach");
-			exit(1);
+			case VCONFTOOL_TYPE_STRING:
+				vconf_set_str(argv[2], argv[3]);
+				break;
+			case VCONFTOOL_TYPE_INT:
+				vconf_set_int(argv[2], atoi(argv[3]));
+				break;
+			case VCONFTOOL_TYPE_DOUBLE:
+				vconf_set_dbl(argv[2], atof(argv[3]));
+				break;
+			case VCONFTOOL_TYPE_BOOL:
+				vconf_set_bool(argv[2], !!atoi(argv[3]));
+				break;
+			default:
+				fprintf(stderr, "never reach");
+				exit(1);
 		}
-
-		/*  Start DAC  ***************************************/
-		if (uid) {
-			fd = open(szFilePath, O_RDONLY);
-			if (-1 == fchown(fd, user_id, user_id)) {
-				fprintf(stderr, "Error!\t Fail to fchown()\n");
-				return -1;
-			}
-			close(fd);
-		} else if (guid) {
-			fd = open(szFilePath, O_RDONLY);
-			if (-1 == fchown(fd, 0, group_id)) {
-				fprintf(stderr, "Error!\t Fail to fchown()\n");
-				return -1;
-			}
-			close(fd);
-		}
-		/*  End DAC  *****************************************/
 
 		/* Install memory backend key into flash space *******/
 		if (is_initialization) {
 			copy_memory_key(argv[2], szFilePath);
 		}
-
 		/* End memory backend key into flash space ***********/
 
 	} else if (!strncmp(argv[1], "get", 3)) {
@@ -334,11 +439,10 @@ static void get_operation(char *input)
 	char *test;
 
 	get_keylist = vconf_keylist_new();
-	/* ParentDIR parameter of gconf_client_all_entries 
+	/* ParentDIR parameter of gconf_client_all_entries
 	can not include the last slash. */
 	if ('/' == input[strlen(input) - 1] && strlen(input) > 8)
 		input[strlen(input) - 1] = '\0';
-	VCONF_DEBUG("vconf_get(%p, %s)", get_keylist, input);
 
 	vconf_get(get_keylist, input, VCONF_GET_ALL);
 	if (!(temp_node = vconf_keylist_nextnode(get_keylist))) {
@@ -349,7 +453,6 @@ static void get_operation(char *input)
 				*(test + 1) = '\0';
 			else
 				*test = '\0';
-			VCONF_DEBUG("vconf_get(%p, %s)", get_keylist, input);
 			vconf_get(get_keylist, input, VCONF_GET_KEY);
 			temp_node = vconf_keylist_nextnode(get_keylist);
 		} else {
@@ -368,7 +471,7 @@ static void get_operation(char *input)
 
 static void recursive_get(char *subDIR, int level)
 {
-	VCONF_DEBUG("%s", subDIR);
+	printf("%s", subDIR);
 
 	keylist_t *get_keylist;
 	keynode_t *first_node;
@@ -385,42 +488,42 @@ static void recursive_get(char *subDIR, int level)
 static void print_keylist(keylist_t *keylist, keynode_t *temp_node, int level)
 {
 	do {
-		switch (vconf_keynode_get_type(temp_node)) {
-		case VCONF_TYPE_INT:
-			printf("%s, value = %d (int)\n",
-			       vconf_keynode_get_name(temp_node),
-			       vconf_keynode_get_int(temp_node));
-			get_num++;
-			break;
-		case VCONF_TYPE_BOOL:
-			printf("%s, value = %d (bool)\n",
-			       vconf_keynode_get_name(temp_node),
-			       vconf_keynode_get_bool(temp_node));
-			get_num++;
-			break;
-		case VCONF_TYPE_DOUBLE:
-			printf("%s, value = %f (double)\n",
-			       vconf_keynode_get_name(temp_node),
-			       vconf_keynode_get_dbl(temp_node));
-			get_num++;
-			break;
-		case VCONF_TYPE_STRING:
-			printf("%s, value = %s (string)\n",
-			       vconf_keynode_get_name(temp_node),
-			       vconf_keynode_get_str(temp_node));
-			get_num++;
-			break;
-		case VCONF_TYPE_DIR:
-			VCONF_DEBUG("%s(Directory)\n",
-				    vconf_keynode_get_name(temp_node));
-			if (is_recursive)
-				recursive_get(vconf_keynode_get_name(temp_node),
-					      level + 1);
-			break;
-		default:
-			/* fprintf(stderr, "Unknown Type(%d)\n", 
-			vconf_keynode_get_type(temp_node)); */
-			break;
+		switch (vconf_keynode_get_type(temp_node))
+		{
+			case VCONF_TYPE_INT:
+				printf("%s, value = %d (int)\n",
+				       vconf_keynode_get_name(temp_node),
+				       vconf_keynode_get_int(temp_node));
+				get_num++;
+				break;
+			case VCONF_TYPE_BOOL:
+				printf("%s, value = %d (bool)\n",
+				       vconf_keynode_get_name(temp_node),
+				       vconf_keynode_get_bool(temp_node));
+				get_num++;
+				break;
+			case VCONF_TYPE_DOUBLE:
+				printf("%s, value = %f (double)\n",
+				       vconf_keynode_get_name(temp_node),
+				       vconf_keynode_get_dbl(temp_node));
+				get_num++;
+				break;
+			case VCONF_TYPE_STRING:
+				printf("%s, value = %s (string)\n",
+				       vconf_keynode_get_name(temp_node),
+				       vconf_keynode_get_str(temp_node));
+				get_num++;
+				break;
+			case VCONF_TYPE_DIR:
+				printf("%s(Directory)\n",
+					vconf_keynode_get_name(temp_node));
+				if (is_recursive)
+					recursive_get(vconf_keynode_get_name(temp_node),
+						      level + 1);
+				break;
+			default:
+				/* fprintf(stderr, "Unknown Type(%d)\n", vconf_keynode_get_type(temp_node)); */
+				break;
 		}
 	} while ((temp_node = vconf_keylist_nextnode(keylist)));
 }
