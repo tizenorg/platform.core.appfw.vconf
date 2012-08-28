@@ -1472,6 +1472,8 @@ static int _vconf_get_key_filesys(keynode_t *keynode, int prefix)
 					_vconf_keynode_set_value_str(keynode, "");
 				}
 			}
+			if(value)
+				free(value);
 
 			break;
 		}
@@ -1693,7 +1695,6 @@ API int vconf_get(keylist_t *keylist, const char *dirpath, get_option_t option)
 		}
 
 		if((readdir_r(dir, &entry, &result)) != 0) {
-			closedir(dir);
 			strerror_r(errno, err_buf, ERR_LEN);
 			ERR("ERROR : read directory(%s) fail(%s)", dirpath, err_buf);
 			func_ret = VCONF_ERROR;

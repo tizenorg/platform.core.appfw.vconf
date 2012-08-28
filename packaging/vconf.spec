@@ -1,7 +1,7 @@
 Name:       vconf
 Summary:    Configuration system library
-Version:    0.2.26
-Release:    1
+Version:    0.2.27
+Release:    0
 Group:      System/Libraries
 License:    Apache License, Version 2.0
 Source0:    %{name}-%{version}.tar.gz
@@ -77,6 +77,10 @@ ln -sf /etc/rc.d/init.d/vconf-init %{buildroot}/etc/rc.d/rc4.d/S04vconf-init
 %{_includedir}/vconf/vconf-keys.h
 
 %changelog
+* Tue Aug 28 2012 - SeungYeup Kim <sy2004.kim@samsung.com>
+- Remove memory leak
+- Remove use after free
+
 * Tue Aug 14 2012 - Hyungdeuk Kim <hd3.kim@samsung.com>
 - Fix issues related prevent
 - Fix warning msg at build time
