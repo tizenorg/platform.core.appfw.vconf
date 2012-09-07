@@ -242,7 +242,7 @@ _vconf_kdb_add_notify(const char *keyname, vconf_callback_fn cb, void *data)
 		ERR("g_list_append fail");
 	}
 
-	INFO("cb is added for %s. tot cb cnt : %d\n", n->keyname, g_list_length(g_notilist));
+	INFO("cb(%p) is added for %s. tot cb cnt : %d\n", cb, n->keyname, g_list_length(g_notilist));
 
 out_func:
 	pthread_mutex_unlock(&_kdb_g_ns_mutex);

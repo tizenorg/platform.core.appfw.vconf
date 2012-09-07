@@ -6,7 +6,7 @@ SET(EXEC_PREFIX "\${prefix}")
 SET(LIBDIR "\${exec_prefix}/lib")
 SET(INCLUDEDIR "\${prefix}/include/${PROJECT_NAME}")
 SET(VERSION_MAJOR 0)
-SET(VERSION "${VERSION_MAJOR}.2.12")
+SET(VERSION "${VERSION_MAJOR}.2.28")
 
 set(CMAKE_SKIP_BUILD_RPATH true)
 
