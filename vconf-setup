@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# This script assumes that /opt/var will be bind-mounted on /var
+
+mkdir /opt/var/run/memory
+chmod 777 /opt/var/run/memory
+
+# set vconf label when first boot
+find /opt/var/kdb/db /opt/var/kdb/file /opt/var/kdb/memory_init/memory -print0 | xargs -0 chsmack -a 'system::vconf'
+find /opt/var/kdb/db /opt/var/kdb/file /opt/var/kdb/memory_init/memory -type d -print0 | xargs -0 chsmack -t
+
