@@ -1,0 +1,15 @@
+
+[Unit]
+Description=Initialize the VConf storage
+DefaultDependencies=no
+After=opt-var-kdb-db-libsqlfs.service
+Requires=opt-var-kdb-db-libsqlfs.service
+Before=basic.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/cp -pr /opt/var/kdb/memory_init/memory /var/run/
+
+[Install]
+WantedBy=basic.target
+
