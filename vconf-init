@@ -1,0 +1,9 @@
+#!/bin/sh
+
+mkdir /var/run/memory
+chmod 777 /var/run/memory
+
+# Copy initialized memory backend key
+cp /opt/var/kdb/memory_init/memory/* /var/run/memory -r -p
+
+touch /tmp/vconf-initialized
