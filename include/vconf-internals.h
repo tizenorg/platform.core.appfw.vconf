@@ -41,9 +41,17 @@
 #define BACKEND_SYSTEM_DIR "/opt/var/kdb/"
 #define BACKEND_MEMORY_DIR "/var/run/"
 
-#define BUF_LEN (1024)
-#define KEY_PATH (128)
-#define ERR_LEN (128)
+/* This value can be optimized according to the device characteristcs and file system configuration */
+#define FILE_ATOMIC_GUARANTEE_SIZE 	4096
+
+#define VCONF_BACKUP_COMPLETE_MARK	0x64416548
+
+#define VCONF_KEY_PATH_LEN 	1024
+#define BUF_LEN 		1024
+#define ERR_LEN 		128
+
+#define VCONF_TYPE_SIZE	sizeof(int)
+#define VCONF_BACKUP_COMP_MARK_SIZE	sizeof(int)
 
 enum {
 	VCONF_BACKEND_NULL = 0,
@@ -84,6 +92,7 @@ enum {
 	VCONF_ERROR_WRONG_TYPE,
 	VCONF_ERROR_WRONG_VALUE,
 	VCONF_ERROR_NO_MEM,
+	VCONF_ERROR_NOT_INITIALIZED,
 	VCONF_ERROR_FILE_OPEN = 11,
 	VCONF_ERROR_FILE_FREAD,
 	VCONF_ERROR_FILE_FGETS,
@@ -92,12 +101,15 @@ enum {
 	VCONF_ERROR_FILE_CLOSE,
 	VCONF_ERROR_FILE_ACCESS,
 	VCONF_ERROR_FILE_CHMOD,
-	VCONF_ERROR_FILE_LOCK
+	VCONF_ERROR_FILE_LOCK,
+	VCONF_ERROR_FILE_REMOVE,
+	VCONF_ERROR_FILE_SEEK,
+	VCONF_ERROR_FILE_TRUNCATE
 };
 
 #define return_err(err) return 0-err;
 
-/* Error codes retunred by the configuration manager */
+/* Error codes returned by the configuration manager */
 #if 0
 typedef enum {
 	/*Unknown Error */

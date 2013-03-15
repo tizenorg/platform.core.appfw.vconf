@@ -51,7 +51,7 @@
 
 	#define INFO(fmt, arg...) SLOGI(fmt, ##arg)
 	#define ERR(fmt, arg...) SLOGE(fmt, ##arg)
-	#define WARN(fmt, arg...) SLOGW(fmt, ##arg
+	#define WARN(fmt, arg...) SLOGW(fmt, ##arg)
 
 #else
 	#include <stdlib.h>

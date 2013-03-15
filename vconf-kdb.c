@@ -101,7 +101,7 @@ static GList* _vconf_copy_noti_list(GList *orig_notilist)
 		}
 
 		n->wd = t->wd;
-		n->keyname = strndup(t->keyname, BUF_LEN);
+		n->keyname = strndup(t->keyname, VCONF_KEY_PATH_LEN);
 		n->cb_data = t->cb_data;
 		n->cb = t->cb;
 
@@ -131,13 +131,13 @@ static gboolean _vconf_kdb_gio_cb(GIOChannel *src, GIOCondition cond, gpointer d
 	struct inotify_event ie;
 	GList *l_notilist = NULL;
 
-	INFO("vconf noti function");
+	//INFO("vconf noti function");
 
 	fd = g_io_channel_unix_get_fd(src);
 	r = read(fd, &ie, sizeof(ie));
 
 	while (r > 0) {
-		INFO("read event from GIOChannel. pid : %d", getpid());
+		//INFO("read event from GIOChannel. pid : %d", getpid());
 
 		pthread_mutex_lock(&_kdb_g_ns_mutex);
 		l_notilist = _vconf_copy_noti_list(g_notilist);
@@ -148,11 +148,11 @@ static gboolean _vconf_kdb_gio_cb(GIOChannel *src, GIOCondition cond, gpointer d
 
 			struct noti_node *t = NULL;
 			GList *noti_list = NULL;
-			keynode_t* keynode = NULL;
 
-			retvm_if(!(ie.mask & INOTY_EVENT_MASK), TRUE,
-				"Invalid argument: ie.mask(%d), ie.len(%d)",
-				 ie.mask, ie.len);
+			if (!(ie.mask & INOTY_EVENT_MASK)) {
+				INFO("Invalid argument: ie.mask(%d), ie.len(%d)", ie.mask, ie.len);
+				return TRUE;
+			}
 
 			noti_list = g_list_first(l_notilist);
 
@@ -173,6 +173,7 @@ static gboolean _vconf_kdb_gio_cb(GIOChannel *src, GIOCondition cond, gpointer d
 						_vconf_keynode_set_keyname(keynode, t->keyname);
 						_vconf_get_key(keynode);
 						t->cb(keynode, t->cb_data);
+						INFO("key(%s) is changed. cb called", t->keyname);
 					}
 				}
 
@@ -250,8 +251,8 @@ static int _vconf_kdb_noti_init(void)
 	int
 _vconf_kdb_add_notify(const char *keyname, vconf_callback_fn cb, void *data)
 {
-	char path[KEY_PATH];
-	int wd, r;
+	char path[VCONF_KEY_PATH_LEN];
+	int wd;
 	struct noti_node t, *n;
 	char err_buf[ERR_LEN] = { 0, };
 	int ret = 0;
@@ -305,7 +306,7 @@ _vconf_kdb_add_notify(const char *keyname, vconf_callback_fn cb, void *data)
 	}
 
 	n->wd = wd;
-	n->keyname = strndup(keyname, BUF_LEN);
+	n->keyname = strndup(keyname, VCONF_KEY_PATH_LEN);
 	n->cb_data = data;
 	n->cb = cb;
 
@@ -329,10 +330,9 @@ _vconf_kdb_del_notify(const char *keyname, vconf_callback_fn cb)
 	int r = 0;
 	struct noti_node *n = NULL;
 	struct noti_node t;
-	char path[KEY_PATH] = { 0, };
+	char path[VCONF_KEY_PATH_LEN] = { 0, };
 	char err_buf[ERR_LEN] = { 0, };
 	int del = 0;
-	int remain = 0;
 	int ret = 0;
 	int func_ret = VCONF_OK;
 	GList *noti_list;

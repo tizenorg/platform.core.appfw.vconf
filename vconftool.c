@@ -30,6 +30,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <errno.h>
 
@@ -113,7 +114,7 @@ static void print_help(const char *cmd)
 	fprintf(stderr,
 		"          -i : Install memory backend key into flash space for backup.\n");
 	fprintf(stderr,
-		"           Ex) %s set -t string db/testapp/key1 \"This is test\" -i\n",
+		"           Ex) %s set -t string memory/testapp/key1 \"This is test\" -i\n",
 		cmd);
 	fprintf(stderr, "\n");
 	fprintf(stderr,
@@ -244,7 +245,7 @@ static int check_file_path_mode(char* file_path)
 			snprintf(szCmd, BUFSIZE, "/bin/mkdir %s -p --mode=755", szPath);
 			disable_invalid_char(szCmd);
 			if (__system(szCmd)) {
-				fprintf(stderr,"Fail mkdir() szCmd=%s\n", __FILE__, __LINE__, szCmd);
+				fprintf(stderr,"[%s:%d]Fail mkdir() szCmd=%s\n", __FILE__, __LINE__, szCmd);
 				return -1;
 			}
 
@@ -295,6 +296,16 @@ static int check_file_path_mode(char* file_path)
 	return 0;
 }
 
+/*
+ * there are three different types of vconf key back-end
+ * 1. filesytem
+ * 2. sqlitefs based on sqlite3
+ * 3. tmpfs based on memory
+ * considering to that tmpfs is volatile so there should be a way
+ * to initialize key into permanent storage. That is the below function
+ * which copy memory back-end key to filesystem back-end, copy other back-end
+ * key to filesystem back-end just makes no sense.
+ */
 static int copy_memory_key(char *pszKey, char *pszOrigin)
 {
 	char szCmd[BUFSIZE] = { 0, };
@@ -302,6 +313,10 @@ static int copy_memory_key(char *pszKey, char *pszOrigin)
 	char szFileName[BUFSIZE] = { 0, };
 	char *pCh = strrchr(pszKey, '/');
 	int nLen = strlen(pszKey);
+
+	/* only copy memory/ prefix key */
+	if (strncmp("memory/", pszKey, 7))
+		return 0;
 
 	/* Get directory path and file name */
 	snprintf(szPath, BUFSIZE, "%s/", MEMORY_INIT);
@@ -353,9 +368,6 @@ int main(int argc, char **argv)
 {
 	int set_type;
 	char szFilePath[BUFSIZE] = { 0, };
-	int fd;
-	int group_id;
-	int user_id;
 	char *psz_key = NULL;
 
 	GError *error = NULL;

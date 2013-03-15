@@ -2,13 +2,13 @@
 [Unit]
 Description=Initialize the VConf storage
 DefaultDependencies=no
-After=opt-var-kdb-db-libsqlfs.service
-Requires=opt-var-kdb-db-libsqlfs.service
+After=var-run.mount
+Requires=var-run.mount
 Before=basic.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/cp -pr /opt/var/kdb/memory_init/memory /var/run/
+ExecStart=/etc/rc.d/init.d/vconf-init
 
 [Install]
 WantedBy=basic.target

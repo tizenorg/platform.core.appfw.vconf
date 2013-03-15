@@ -34,9 +34,12 @@
 #define API __attribute__ ((visibility("default")))
 #endif
 
-#define VCONF_ERROR_RETRY_CNT 10
-#define VCONF_ERROR_RETRY_SLEEP_UTIME 5000
+#define VCONF_ERROR_RETRY_CNT 20
+#define VCONF_ERROR_RETRY_SLEEP_UTIME 10000
 
+#define VCONF_NOT_INITIALIZED (access("/tmp/vconf-initialized", F_OK) == -1)
+
+#ifdef VCONF_USE_SQLFS_TRANSACTION
 int IN_SBOX=0;
 
 #define VCONF_MOUNT_PATH "/opt/var/kdb/db"
@@ -48,6 +51,7 @@ do{\
 }while(0)
 
 __thread int is_transaction;
+#endif
 
 #ifdef VCONF_TIMECHECK
 double correction, startT;
@@ -81,7 +85,7 @@ int init_time(void)
 int _vconf_keynode_set_keyname(keynode_t *keynode, const char *keyname)
 {
 	if (keynode->keyname) free(keynode->keyname);
-	keynode->keyname = strndup(keyname, BUF_LEN);
+	keynode->keyname = strndup(keyname, VCONF_KEY_PATH_LEN);
 	retvm_if(keynode->keyname == NULL, VCONF_ERROR, "strndup Fails");
 	return VCONF_OK;
 }
@@ -601,11 +605,11 @@ int _vconf_get_key_prefix(const char *keyname, int *prefix)
 int _vconf_get_key_path(const char *keyname, char *path)
 {
 	if (strncmp(keyname, BACKEND_DB_PREFIX, sizeof(BACKEND_DB_PREFIX) - 1) == 0) {
-		snprintf(path, KEY_PATH, "%s%s", BACKEND_SYSTEM_DIR, keyname);
+		snprintf(path, VCONF_KEY_PATH_LEN, "%s%s", BACKEND_SYSTEM_DIR, keyname);
 	} else if (0 == strncmp(keyname, BACKEND_FILE_PREFIX, sizeof(BACKEND_FILE_PREFIX) - 1)) {
-		snprintf(path, KEY_PATH, "%s%s", BACKEND_SYSTEM_DIR, keyname);
+		snprintf(path, VCONF_KEY_PATH_LEN, "%s%s", BACKEND_SYSTEM_DIR, keyname);
 	} else if (0 == strncmp(keyname, BACKEND_MEMORY_PREFIX, sizeof(BACKEND_MEMORY_PREFIX) - 1)) {
-		snprintf(path, KEY_PATH, "%s%s", BACKEND_MEMORY_DIR, keyname);
+		snprintf(path, VCONF_KEY_PATH_LEN, "%s%s", BACKEND_MEMORY_DIR, keyname);
 	} else {
 		ERR("Invalid argument: wrong prefix of key(%s)", keyname);
 		return VCONF_ERROR_WRONG_PREFIX;
@@ -614,13 +618,32 @@ int _vconf_get_key_path(const char *keyname, char *path)
 	return VCONF_OK;
 }
 
+#ifdef VCONF_USE_BACKUP_TRANSACTION
+int _vconf_get_backup_path(const char *keyname, char *path)
+{
+	char key_buf[VCONF_KEY_PATH_LEN] = {0, };
+	int i;
+
+	for(i = 0; i<VCONF_KEY_PATH_LEN-1 && keyname[i] != '\0' ; i++) {
+		if (keyname[i] == '/')
+			key_buf[i] = '$';
+		else
+			key_buf[i] = keyname[i];
+	}
+
+	snprintf(path, VCONF_KEY_PATH_LEN, "%s%s%s%s", BACKEND_SYSTEM_DIR, BACKEND_DB_PREFIX, ".backup/", key_buf);
+
+	return VCONF_OK;
+}
+#endif
+
 #ifndef DISABLE_RUNTIME_KEY_CREATION
 static int _vconf_set_key_check_parent_dir(const char* path)
 {
 	int exists = 0;
 	struct stat stat_info;
 	char* parent;
-	char path_buf[KEY_PATH] = {0,};
+	char path_buf[VCONF_KEY_PATH_LEN] = {0,};
 	int ret = 0;
 
 	mode_t dir_mode =  0664 | 0111;
@@ -665,19 +688,14 @@ static int _vconf_set_key_creation(const char* path)
 
 static int _vconf_set_file_lock(int fd, short type)
 {
-#ifdef HAVE_FCNTL_H
-	int ret = 0;
 	struct flock l;
 
 	l.l_type = type; /*Do read Lock*/
 	l.l_start= 0;	    /*Start at begin*/
 	l.l_whence = SEEK_SET;
 	l.l_len = 0;	    /*Do it with whole file*/
-	ret = fcntl(fd, F_SETLKW, &l);
-	return ret;
-#else
-	return 0;
-#endif
+
+	return fcntl(fd, F_SETLKW, &l);
 }
 
 static int _vconf_set_read_lock(int fd)
@@ -695,6 +713,7 @@ static int _vconf_set_unlock(int fd)
 	return _vconf_set_file_lock(fd, F_UNLCK);
 }
 
+#ifdef VCONF_USE_SQLFS_TRANSACTION
 static void _vconf_acquire_transaction_delay(int ms)
 {
     struct timeval timeout;
@@ -714,6 +733,7 @@ static int _vconf_db_begin_transaction()
 transaction_retry:
 		if(setxattr(VCONF_MOUNT_PATH, "full_db_transaction_start", &value, sizeof(value), 0) == -1)
 		{
+			//ERR("someone access vconf. retrying...(%d)", errno);
 			_vconf_acquire_transaction_delay(50);
 			goto transaction_retry;
 		} else {
@@ -735,10 +755,17 @@ static int _vconf_db_commit_transaction()
 
 	if(is_transaction == 1) {
 		value = getpid();
-		setxattr(VCONF_MOUNT_PATH, "full_db_transaction_stop", &value, sizeof(value), 0);
-		is_transaction = 0;
+transaction_retry:
+		if(setxattr(VCONF_MOUNT_PATH, "full_db_transaction_stop", &value, sizeof(value), 0) == -1)
+		{
+			//ERR("setxattr failed. retrying...(%d)", errno);
+			_vconf_acquire_transaction_delay(50);
+			goto transaction_retry;
+		} else {
+			is_transaction = 0;
+		}
 	} else {
-		is_transaction --;
+		is_transaction--;
 	}
 
 	return 0;
@@ -753,43 +780,319 @@ static int _vconf_db_rollback_transaction()
 
 	if(is_transaction == 1) {
 		value = getpid();
-		setxattr(VCONF_MOUNT_PATH, "full_db_transaction_rb", &value, sizeof(value), 0);
-		is_transaction = 0;
+transaction_retry:
+		if(setxattr(VCONF_MOUNT_PATH, "full_db_transaction_rb", &value, sizeof(value), 0) == -1)
+		{
+			//ERR("setxattr failed. retrying...(%d)", errno);
+			_vconf_acquire_transaction_delay(50);
+			goto transaction_retry;
+		} else {
+			is_transaction = 0;
+		}
 	} else {
 		is_transaction --;
 	}
 
 	return 0;
 }
+#endif //VCONF_USE_SQLFS_TRANSACTION
+
+#ifdef VCONF_USE_BACKUP_TRANSACTION
+
+static int _vconf_backup_check(char* vconf_path, char* backup_path)
+{
+	int ret = VCONF_OK;
+	int vconf_fd = -1;
+	int backup_fd = -1;
+	char file_buf[BUF_LEN] = { 0, };
+	char err_buf[100] = { 0, };
+	int complete_mark = 0;
+	int read_len;
+	int err_no = 0;
+	int is_recovered = 0;
+	int file_size;
+
+	if (access(vconf_path, F_OK) == -1 || access(backup_path, F_OK) == -1)
+		return ret;
+
+	vconf_fd = open(vconf_path, O_WRONLY);
+	if (vconf_fd == -1) {
+		ERR("open %s failed", vconf_path);
+		ret = VCONF_ERROR_FILE_OPEN;
+		err_no = errno;
+		goto out_close;
+	}
+
+	if(_vconf_set_write_lock(vconf_fd) == -1) {
+		ERR("set write lock %s failed", vconf_path);
+		ret = VCONF_ERROR_FILE_LOCK;
+		err_no = errno;
+		goto out_close;
+	}
+
+	backup_fd = open(backup_path, O_RDONLY);
+	if (backup_fd == -1) {
+		ERR("open %s failed", backup_path);
+		ret = VCONF_ERROR_FILE_OPEN;
+		err_no = errno;
+		goto out_unlock;
+	}
+
+	file_size = lseek(backup_fd, 0, SEEK_END);
+	if (file_size == -1) {
+		ERR("seek end %s failed", backup_path);
+		ret = VCONF_ERROR_FILE_SEEK;
+		err_no = errno;
+		goto out_unlock;
+	} else if (file_size < FILE_ATOMIC_GUARANTEE_SIZE + VCONF_BACKUP_COMP_MARK_SIZE) {
+		goto out_unlock;
+	}
+
+	if (lseek(backup_fd, 0, SEEK_SET) != 0) {
+		ERR("seek %s failed", backup_path);
+		ret = VCONF_ERROR_FILE_SEEK;
+		err_no = errno;
+		goto out_unlock;
+	}
+
+	read_len = read(backup_fd, &complete_mark, sizeof(int));
+	if (read_len < sizeof(int))
+		goto out_unlock;
+
+	if (complete_mark != VCONF_BACKUP_COMPLETE_MARK)
+		goto out_unlock;
+
+	if (ftruncate(vconf_fd, 0) == -1) {
+		ERR("truncate %s failed", vconf_path);
+		ret = VCONF_ERROR_FILE_TRUNCATE;
+		err_no = errno;
+		goto out_unlock;
+	}
+
+	while ( (read_len = read(backup_fd, file_buf, BUF_LEN )) >0) {
+		if(write(vconf_fd, file_buf, read_len) != read_len) {
+			ERR("write %s failed", backup_path);
+			ret = VCONF_ERROR_FILE_WRITE;
+			err_no = errno;
+			goto out_unlock;
+		}
+	}
+
+	is_recovered = 1;
+
+out_unlock :
+	if(_vconf_set_unlock(vconf_fd)==-1) {
+		ERR("unset write lock %s failed", vconf_path);
+		ret = VCONF_ERROR_FILE_LOCK;
+		err_no = errno;
+		goto out_close;
+	}
+
+out_close:
+	if (vconf_fd != -1)
+		close(vconf_fd);
+	if(backup_fd != -1)
+		close(backup_fd);
+
+	if(ret == VCONF_OK) {
+		if(remove(backup_path) == -1) {
+			ret = VCONF_ERROR_FILE_REMOVE;
+			err_no = errno;
+		}
+	}
+
+	if(ret != VCONF_OK) {
+		strerror_r(err_no, err_buf, 100);
+		ERR("_vconf_backup_check failed %d (%d / %s)\n", ret, err_no, err_buf);
+	} else if (is_recovered)
+		WARN("vconf(%s) successfully recovered and backup file is removed", vconf_path, backup_path);
+	else
+		WARN("vconf(%s)'s non-complete backup file is removed", vconf_path, backup_path);
+
+	return ret;
+}
+
+static int _vconf_backup_write_str(char* backup_path, char* value)
+{
+	int ret = VCONF_OK;
+	char err_buf[100] = { 0, };
+	int err_no = 0;
+	int backup_fd = -1;
+	int write_len = 0;
+	int complete_mark = VCONF_BACKUP_COMPLETE_MARK;
+	int empty_mark = 0;
+	int vconf_type_str = VCONF_TYPE_STRING;
+	int result;
+
+	if( (backup_fd = open(backup_path, O_CREAT|O_EXCL|O_WRONLY, 0666)) == -1 ) {
+		ERR("open %s failed", backup_path);
+		ret = VCONF_ERROR_FILE_OPEN;
+		err_no = errno;
+		goto out_close;
+	}
+
+	if ((result = write(backup_fd, (void *)&empty_mark, sizeof(int))) != sizeof(int)) {
+		ERR("write empty mark of %s failed %d", backup_path, result);
+		ret = VCONF_ERROR_FILE_WRITE;
+		err_no = errno;
+		goto out_close;
+	}
+
+	if ((result = write(backup_fd, (void *)&vconf_type_str, sizeof(int))) != sizeof(int)) {
+		ERR("write type of %s failed %d", backup_path, result);
+		ret = VCONF_ERROR_FILE_WRITE;
+		err_no = errno;
+		goto out_close;
+	}
+
+	write_len = strlen(value);
+	if((result = write(backup_fd, value, write_len)) != write_len) {
+		ERR("write %s failed %d", backup_path, result);
+		ret = VCONF_ERROR_FILE_WRITE;
+		err_no = errno;
+		goto out_close;
+
+	}
+
+	if (fdatasync(backup_fd) == -1) {
+		ERR("sync %s failed", backup_path);
+		ret = VCONF_ERROR_FILE_SYNC;
+		err_no = errno;
+		goto out_close;
+	}
+
+	if (lseek(backup_fd, 0, SEEK_SET) != 0) {
+		ERR("seek %s failed", backup_path);
+		ret = VCONF_ERROR_FILE_SEEK;
+		err_no = errno;
+		goto out_close;
+	}
+
+	if((result = write(backup_fd, (void *)&complete_mark, sizeof(int))) != sizeof(int)) {
+		ERR("write complete mark of %s failed %d", backup_path, result);
+		ret = VCONF_ERROR_FILE_WRITE;
+		err_no = errno;
+		goto out_close;
+	}
+
+	if (fdatasync(backup_fd) == -1) {
+		ERR("sync %s failed", backup_path);
+		ret = VCONF_ERROR_FILE_SYNC;
+		err_no = errno;
+		goto out_close;
+	}
+
+out_close:
+	if(backup_fd != -1)
+		close(backup_fd);
+
+	if(ret != VCONF_OK) {
+		strerror_r(err_no, err_buf, 100);
+		ERR("_vconf_backup_write_str failed %d (%d / %s)\n", ret, err_no, err_buf);
+	}
+
+	return ret;
+
+}
+
+static int _vconf_backup_commit(char* backup_path)
+{
+	int ret = VCONF_OK;
+	char err_buf[100] = { 0, };
+	int err_no = 0;
+
+	if(remove(backup_path) == -1) {
+		ERR("remove %s failed", backup_path);
+		ret = VCONF_ERROR_FILE_REMOVE;
+		err_no = errno;
+	}
+
+	if(ret != VCONF_OK) {
+		strerror_r(err_no, err_buf, 100);
+		ERR("_vconf_backup_commit failed %d (%d / %s)\n", ret, err_no, err_buf);
+	}
+
+	return ret;
+
+}
+#endif // VCONF_USE_BACKUP_TRANSACTION
 
 static int _vconf_set_key_filesys(keynode_t *keynode, int prefix)
 {
-	char path[KEY_PATH] = {0,};
+	char path[VCONF_KEY_PATH_LEN] = {0,};
 	FILE *fp = NULL;
 	int ret = -1;
 	int func_ret = VCONF_OK;
 	int err_no = 0;
 	char err_buf[100] = { 0, };
 	int is_write_error = 0;
+#ifdef VCONF_USE_BACKUP_TRANSACTION
+	char backup_path[VCONF_KEY_PATH_LEN] = {0,};
+	int is_backup_need = 0;
+	int file_size = 0;
+#endif
 
 	errno = 0;
 
 	ret = _vconf_get_key_path(keynode->keyname, path);
 	retv_if(ret != VCONF_OK, ret);
 
-	if( (fp = fopen(path, "w")) == NULL ) {
+	if(prefix == VCONF_BACKEND_MEMORY && VCONF_NOT_INITIALIZED) {
+		func_ret = VCONF_ERROR_NOT_INITIALIZED;
+		goto out_return;
+	}
+
+#ifdef VCONF_USE_BACKUP_TRANSACTION
+	if(prefix == VCONF_BACKEND_DB && keynode->type == VCONF_TYPE_STRING) {
+		_vconf_get_backup_path(keynode->keyname, backup_path);
+		ret = _vconf_backup_check(path, backup_path);
+		if(ret != VCONF_OK) {
+			func_ret = ret;
+			err_no = errno;
+			goto out_return;
+		}
+	}
+#endif
+
+	if( (fp = fopen(path, "r+")) == NULL ) {
 		func_ret = VCONF_ERROR_FILE_OPEN;
 		err_no = errno;
 		goto out_return;
 	}
 
-	if(prefix != VCONF_BACKEND_DB) {
-		(void) _vconf_set_write_lock(fileno(fp));
-		if(errno != 0) {
+#ifdef VCONF_USE_SQLFS_TRANSACTION
+	if (prefix != VCONF_BACKEND_DB)
+#endif
+	{
+		ret = _vconf_set_write_lock(fileno(fp));
+		if(ret == -1) {
 			func_ret = VCONF_ERROR_FILE_LOCK;
 			err_no = errno;
 			goto out_close;
 		}
+	}
+
+#ifdef VCONF_USE_BACKUP_TRANSACTION
+	if(prefix == VCONF_BACKEND_DB && keynode->type == VCONF_TYPE_STRING) {
+		file_size = VCONF_TYPE_SIZE + strlen(keynode->value.s);
+		if (file_size > FILE_ATOMIC_GUARANTEE_SIZE) {
+			is_backup_need = 1;
+
+			ret = _vconf_backup_write_str(backup_path, keynode->value.s);
+			if(ret != VCONF_OK) {
+				func_ret = ret;
+				err_no = errno;
+				goto out_unlock;
+			} else
+				WARN("vconf backup file for(%s) is created. file size(%d)", path, file_size);
+		}
+	}
+#endif
+
+	if (ftruncate(fileno(fp), 0) == -1) {
+		func_ret = VCONF_ERROR_FILE_TRUNCATE;
+		err_no = errno;
+		goto out_unlock;
 	}
 
 	/* write key type */
@@ -840,8 +1143,12 @@ static int _vconf_set_key_filesys(keynode_t *keynode, int prefix)
 		goto out_unlock;
 	}
 
-#ifdef ENABLE_FDATASYNC
-	if(prefix == VCONF_BACKEND_FILE) {
+#ifdef VCONF_USE_SQLFS_TRANSACTION
+	if(prefix == VCONF_BACKEND_FILE)
+#else
+	if(prefix == VCONF_BACKEND_FILE || prefix == VCONF_BACKEND_DB)
+#endif
+	{
 		fflush(fp);
 
 		ret = fdatasync(fileno(fp));
@@ -850,18 +1157,30 @@ static int _vconf_set_key_filesys(keynode_t *keynode, int prefix)
 			func_ret = VCONF_ERROR_FILE_SYNC;
 		}
 	}
+
+#ifdef VCONF_USE_BACKUP_TRANSACTION
+	if (is_backup_need) {
+		ret = _vconf_backup_commit(backup_path);
+		if(ret != VCONF_OK) {
+			func_ret = ret;
+			err_no = errno;
+			goto out_unlock;
+		}
+	}
 #endif
 
 out_unlock :
-	if(prefix != VCONF_BACKEND_DB) {
-		(void) _vconf_set_unlock(fileno(fp));
-		if(errno != 0) {
+#ifdef VCONF_USE_SQLFS_TRANSACTION
+	if (prefix != VCONF_BACKEND_DB)
+#endif
+	{
+		ret = _vconf_set_unlock(fileno(fp));
+		if(ret == -1) {
 			func_ret = VCONF_ERROR_FILE_LOCK;
 			err_no = errno;
 			goto out_close;
 		}
 	}
-
 out_close :
 	fclose(fp);
 
@@ -886,16 +1205,23 @@ static int _vconf_set_key(keynode_t *keynode)
 	ret = _vconf_get_key_prefix(keynode->keyname, &prefix);
 	retv_if(ret != VCONF_OK, ret);
 
+#ifdef VCONF_USE_SQLFS_TRANSACTION
 	if(prefix == VCONF_BACKEND_DB) {
 		_vconf_db_begin_transaction();
 	}
+#endif
 
 	while((ret = _vconf_set_key_filesys(keynode, prefix)) != VCONF_OK)
 	{
 		is_busy_err = 0;
 		retry++;
 
-		if(ret == VCONF_ERROR_FILE_OPEN)
+		if(VCONF_NOT_INITIALIZED)
+		{
+			ERR("%s : vconf is not initialized\n", keynode->keyname);
+			is_busy_err = 1;
+		}
+		else if(ret == VCONF_ERROR_FILE_OPEN)
 		{
 			switch (errno)
 			{
@@ -904,7 +1230,7 @@ static int _vconf_set_key(keynode_t *keynode)
 				case EFAULT :
 				case ENOENT :
 				{
-					char path[KEY_PATH] = {0,};
+					char path[VCONF_KEY_PATH_LEN] = {0,};
 					rc = _vconf_get_key_path(keynode->keyname, path);
 					if(rc != VCONF_OK) {
 						ERR("_vconf_get_key_path error");
@@ -988,6 +1314,7 @@ static int _vconf_set_key(keynode_t *keynode)
 		}
 	}
 
+#ifdef VCONF_USE_SQLFS_TRANSACTION
 	if(prefix == VCONF_BACKEND_DB) {
 		if(func_ret == VCONF_ERROR) {
 			_vconf_db_rollback_transaction();
@@ -995,6 +1322,7 @@ static int _vconf_set_key(keynode_t *keynode)
 			_vconf_db_commit_transaction();
 		}
 	}
+#endif
 
 	return func_ret;
 }
@@ -1025,9 +1353,11 @@ API int vconf_set(keylist_t *keylist)
 	ret = _vconf_get_key_prefix(got_node->keyname, &prefix);
 	retv_if(ret != VCONF_OK, ret);
 
+#ifdef VCONF_USE_SQLFS_TRANSACTION
 	if(prefix == VCONF_BACKEND_DB) {
 		_vconf_db_begin_transaction();
 	}
+#endif
 
 	while (got_node != NULL) {
 		ret = _vconf_set_key(got_node);
@@ -1038,6 +1368,7 @@ API int vconf_set(keylist_t *keylist)
 		got_node = _vconf_keynode_next(got_node);
 	}
 
+#ifdef VCONF_USE_SQLFS_TRANSACTION
 	if(prefix == VCONF_BACKEND_DB) {
 		if(func_ret == VCONF_ERROR) {
 			_vconf_db_rollback_transaction();
@@ -1045,6 +1376,7 @@ API int vconf_set(keylist_t *keylist)
 			_vconf_db_commit_transaction();
 		}
 	}
+#endif
 
 	END_TIME_CHECK
 
@@ -1056,7 +1388,7 @@ API int vconf_sync_key(const char *in_key)
 	START_TIME_CHECK
 
 	int fd;
-	char path[KEY_PATH] = {0,};
+	char path[VCONF_KEY_PATH_LEN] = {0,};
 	int ret = -1;
 
 	ret = _vconf_get_key_path(in_key, path);
@@ -1361,18 +1693,39 @@ out_return :
 
 static int _vconf_get_key_filesys(keynode_t *keynode, int prefix)
 {
-	char path[KEY_PATH] = {0,};
+	char path[VCONF_KEY_PATH_LEN] = {0,};
 	int ret = -1;
 	int func_ret = VCONF_OK;
 	char err_buf[100] = { 0, };
 	int err_no = 0;
 	int type = 0;
 	FILE *fp = NULL;
+#ifdef VCONF_USE_BACKUP_TRANSACTION
+	char backup_path[VCONF_KEY_PATH_LEN] = {0,};
+#endif
 
 	errno = 0;
 
 	ret = _vconf_get_key_path(keynode->keyname, path);
 	retv_if(ret != VCONF_OK, ret);
+
+	if(prefix == VCONF_BACKEND_MEMORY && VCONF_NOT_INITIALIZED)
+	{
+		func_ret = VCONF_ERROR_NOT_INITIALIZED;
+		goto out_return;
+	}
+
+#ifdef VCONF_USE_BACKUP_TRANSACTION
+	if(prefix == VCONF_BACKEND_DB) {
+		_vconf_get_backup_path(keynode->keyname, backup_path);
+		ret = _vconf_backup_check(path, backup_path);
+		if(ret != VCONF_OK) {
+			func_ret = ret;
+			err_no = errno;
+			goto out_return;
+		}
+	}
+#endif
 
 	if( (fp = fopen(path, "r")) == NULL ) {
 		func_ret = VCONF_ERROR_FILE_OPEN;
@@ -1380,9 +1733,12 @@ static int _vconf_get_key_filesys(keynode_t *keynode, int prefix)
 		goto out_return;
 	}
 
-	if(prefix != VCONF_BACKEND_DB) {
-		(void) _vconf_set_read_lock(fileno(fp));
-		if(errno != 0) {
+#ifdef VCONF_USE_SQLFS_TRANSACTION
+	if (prefix != VCONF_BACKEND_DB)
+#endif
+	{
+		ret = _vconf_set_read_lock(fileno(fp));
+		if(ret == -1) {
 			func_ret = VCONF_ERROR_FILE_LOCK;
 			err_no = errno;
 			goto out_close;
@@ -1506,9 +1862,12 @@ static int _vconf_get_key_filesys(keynode_t *keynode, int prefix)
 	}
 
 out_unlock :
-	if(prefix != VCONF_BACKEND_DB) {
-		(void) _vconf_set_unlock(fileno(fp));
-		if(errno != 0) {
+#ifdef VCONF_USE_SQLFS_TRANSACTION
+	if (prefix != VCONF_BACKEND_DB)
+#endif
+	{
+		ret = _vconf_set_unlock(fileno(fp));
+		if(ret == -1) {
 			func_ret = VCONF_ERROR_FILE_LOCK;
 			err_no = errno;
 			goto out_close;
@@ -1539,16 +1898,23 @@ int _vconf_get_key(keynode_t *keynode)
 	ret = _vconf_get_key_prefix(keynode->keyname, &prefix);
 	retv_if(ret != VCONF_OK, ret);
 
+#ifdef VCONF_USE_SQLFS_TRANSACTION
 	if(prefix == VCONF_BACKEND_DB) {
 		_vconf_db_begin_transaction();
 	}
+#endif
 
 	while((ret = _vconf_get_key_filesys(keynode, prefix)) != VCONF_OK)
 	{
 		is_busy_err = 0;
 		retry++;
 
-		if(ret == VCONF_ERROR_FILE_OPEN)
+		if(VCONF_NOT_INITIALIZED)
+		{
+			ERR("%s : vconf is not initialized\n", keynode->keyname);
+			is_busy_err = 1;
+		}
+		else if(ret == VCONF_ERROR_FILE_OPEN)
 		{
 			switch (errno)
 			{
@@ -1601,6 +1967,7 @@ int _vconf_get_key(keynode_t *keynode)
 		}
 	}
 
+#ifdef VCONF_USE_SQLFS_TRANSACTION
 	if(prefix == VCONF_BACKEND_DB) {
 		if(func_ret == VCONF_ERROR) {
 			_vconf_db_rollback_transaction();
@@ -1608,10 +1975,12 @@ int _vconf_get_key(keynode_t *keynode)
 			_vconf_db_commit_transaction();
 		}
 	}
+#endif
 
 	return func_ret;
 }
 
+/*
 static int _vconf_check_value_integrity(const void *value, int type)
 {
 	int i = 0;
@@ -1645,6 +2014,7 @@ static int _vconf_check_value_integrity(const void *value, int type)
 		return -2;
 	}
 }
+*/
 
 int _vconf_path_is_dir(char* path)
 {
@@ -1666,9 +2036,9 @@ API int vconf_get(keylist_t *keylist, const char *dirpath, get_option_t option)
 	DIR *dir = NULL;
 	struct dirent entry;
 	struct dirent *result = NULL;
-	char full_file_path[KEY_PATH] = {0,};
-	char file_path[KEY_PATH] = {0,};
-	char full_path[KEY_PATH] = {0,};
+	char full_file_path[VCONF_KEY_PATH_LEN] = {0,};
+	char file_path[VCONF_KEY_PATH_LEN] = {0,};
+	char full_path[VCONF_KEY_PATH_LEN] = {0,};
 	char err_buf[ERR_LEN] = {0,};
 	int rc = 0;
 	int func_ret = 0;
@@ -1702,16 +2072,19 @@ API int vconf_get(keylist_t *keylist, const char *dirpath, get_option_t option)
 	ret = _vconf_get_key_prefix(dirpath, &prefix);
 	retv_if(ret != VCONF_OK, ret);
 
+#ifdef VCONF_USE_SQLFS_TRANSACTION
 	if(prefix == VCONF_BACKEND_DB) {
 		_vconf_db_begin_transaction();
 	}
+#endif
 
 	is_dir = _vconf_path_is_dir(full_path);
 	if(is_dir == 1) {
 		if((dir=opendir(full_path)) == NULL) {
 			strerror_r(errno, err_buf, ERR_LEN);
 			ERR("ERROR : open directory(%s) fail(%s)", dirpath, err_buf);
-			return VCONF_ERROR;
+			func_ret = VCONF_ERROR;
+			goto out_unlock;
 		}
 
 		if((readdir_r(dir, &entry, &result)) != 0) {
@@ -1730,11 +2103,12 @@ API int vconf_get(keylist_t *keylist, const char *dirpath, get_option_t option)
 			if(keynode == NULL) {
 				closedir(dir);
 				ERR("Invalid argument: key malloc fail");
-				return VCONF_ERROR;
+				func_ret = VCONF_ERROR;
+				goto out_unlock;
 			}
 
-			snprintf(file_path, KEY_PATH, "%s/%s", dirpath, entry.d_name);
-			snprintf(full_file_path, KEY_PATH, "%s/%s", full_path, entry.d_name);
+			snprintf(file_path, VCONF_KEY_PATH_LEN, "%s/%s", dirpath, entry.d_name);
+			snprintf(full_file_path, VCONF_KEY_PATH_LEN, "%s/%s", full_path, entry.d_name);
 
 			rc = _vconf_path_is_dir(full_file_path);
 			if(rc != VCONF_ERROR) {
@@ -1803,10 +2177,13 @@ API int vconf_get(keylist_t *keylist, const char *dirpath, get_option_t option)
 		}
 		keylist->num += 1;
 	} else {
-		return VCONF_ERROR;
+		func_ret = VCONF_ERROR;
+		goto out_unlock;
 	}
 	vconf_keylist_rewind(keylist);
 
+out_unlock:
+#ifdef VCONF_USE_SQLFS_TRANSACTION
 	if(prefix == VCONF_BACKEND_DB) {
 		if(func_ret == VCONF_ERROR) {
 			_vconf_db_rollback_transaction();
@@ -1814,6 +2191,7 @@ API int vconf_get(keylist_t *keylist, const char *dirpath, get_option_t option)
 			_vconf_db_commit_transaction();
 		}
 	}
+#endif
 
 	return func_ret;
 }
@@ -1831,18 +2209,22 @@ API int vconf_get_int(const char *in_key, int *intval)
 	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is null");
 	retvm_if(intval == NULL, VCONF_ERROR, "Invalid argument: output buffer is null");
 
-	int func_ret = VCONF_OK;
+	int func_ret = VCONF_ERROR;
 	keynode_t* pKeyNode = _vconf_keynode_new();
 	retvm_if(pKeyNode == NULL, VCONF_ERROR, "key malloc fail");
 
 	_vconf_keynode_set_keyname(pKeyNode, in_key);
 
-	if (_vconf_get_key(pKeyNode) != VCONF_OK) {
+	if (_vconf_get_key(pKeyNode) != VCONF_OK)
 		ERR("vconf_get_int(%d) : %s error", getpid(), in_key);
-		func_ret = VCONF_ERROR;
-	} else {
-		*intval = vconf_keynode_get_int(pKeyNode);
-		INFO("vconf_get_int(%d) : %s(%d) success", getpid(), in_key, *intval);
+	else {
+		*intval = pKeyNode->value.i;
+
+		if(pKeyNode->type == VCONF_TYPE_INT) {
+			INFO("vconf_get_int(%d) : %s(%d) success", getpid(), in_key, *intval);
+			func_ret = VCONF_OK;
+		} else
+			ERR("The type(%d) of keynode(%s) is not INT", pKeyNode->type, pKeyNode->keyname);
 	}
 
 	_vconf_keynode_free(pKeyNode);
@@ -1865,18 +2247,22 @@ API int vconf_get_bool(const char *in_key, int *boolval)
 	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is null");
 	retvm_if(boolval == NULL, VCONF_ERROR, "Invalid argument: output buffer is null");
 
-	int func_ret = VCONF_OK;
+	int func_ret = VCONF_ERROR;
 	keynode_t* pKeyNode = _vconf_keynode_new();
 	retvm_if(pKeyNode == NULL, VCONF_ERROR, "key malloc fail");
 
 	_vconf_keynode_set_keyname(pKeyNode, in_key);
 
-	if (_vconf_get_key(pKeyNode) != VCONF_OK) {
+	if (_vconf_get_key(pKeyNode) != VCONF_OK)
 		ERR("vconf_get_bool(%d) : %s error", getpid(), in_key);
-		func_ret = VCONF_ERROR;
-	} else {
-		*boolval = vconf_keynode_get_bool(pKeyNode);
-		INFO("vconf_get_bool(%d) : %s(%d) success", getpid(), in_key, *boolval);
+	else {
+		*boolval = !!(pKeyNode->value.b);
+
+		if(pKeyNode->type == VCONF_TYPE_BOOL) {
+			INFO("vconf_get_bool(%d) : %s(%d) success", getpid(), in_key, *boolval);
+			func_ret = VCONF_OK;
+		} else
+			ERR("The type(%d) of keynode(%s) is not BOOL", pKeyNode->type, pKeyNode->keyname);
 	}
 
 	_vconf_keynode_free(pKeyNode);
@@ -1899,18 +2285,23 @@ API int vconf_get_dbl(const char *in_key, double *dblval)
 	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is null");
 	retvm_if(dblval == NULL, VCONF_ERROR, "Invalid argument: output buffer is null");
 
-	int func_ret = VCONF_OK;
+	int func_ret = VCONF_ERROR;
 	keynode_t* pKeyNode = _vconf_keynode_new();
 	retvm_if(pKeyNode == NULL, VCONF_ERROR, "key malloc fail");
 
 	_vconf_keynode_set_keyname(pKeyNode, in_key);
 
-	if (_vconf_get_key(pKeyNode) != VCONF_OK) {
+	if (_vconf_get_key(pKeyNode) != VCONF_OK)
 		ERR("vconf_get_dbl(%d) : %s error", getpid(), in_key);
-		func_ret = VCONF_ERROR;
-	} else {
-		*dblval = vconf_keynode_get_dbl(pKeyNode);
-		INFO("vconf_get_dbl(%d) : %s(%f) success", getpid(), in_key, *dblval);
+	else {
+
+		*dblval = pKeyNode->value.d;
+
+		if(pKeyNode->type == VCONF_TYPE_DOUBLE) {
+			INFO("vconf_get_dbl(%d) : %s(%f) success", getpid(), in_key, *dblval);
+			func_ret = VCONF_OK;
+		} else
+			ERR("The type(%d) of keynode(%s) is not DBL", pKeyNode->type, pKeyNode->keyname);
 	}
 
 	_vconf_keynode_free(pKeyNode);
@@ -1942,10 +2333,15 @@ API char *vconf_get_str(const char *in_key)
 	if (_vconf_get_key(pKeyNode) != VCONF_OK) {
 		ERR("vconf_get_str(%d) : %s error", getpid(), in_key);
 	} else {
-		tempstr = vconf_keynode_get_str(pKeyNode);
+
+		if(pKeyNode->type == VCONF_TYPE_STRING)
+			tempstr = pKeyNode->value.s;
+		else
+			ERR("The type(%d) of keynode(%s) is not STR", pKeyNode->type, pKeyNode->keyname);
+
 		if(tempstr)
 			strval = strdup(tempstr);
-		INFO("vconf_get_str(%d) : %s success", getpid(), in_key);
+		INFO("vconf_get_str(%d) : %s(%s) success", getpid(), in_key, strval);
 	}
 
 	_vconf_keynode_free(pKeyNode);
@@ -1964,15 +2360,19 @@ API int vconf_unset(const char *in_key)
 {
 	START_TIME_CHECK
 
-	char path[KEY_PATH] = {0,};
+	char path[VCONF_KEY_PATH_LEN] = {0,};
 	int ret = -1;
 	int err_retry = VCONF_ERROR_RETRY_CNT;
 	int func_ret = VCONF_OK;
+
+	WARN("vconf_unset: %s. THIS API(vconf_unset) WILL BE DEPRECATED", in_key);
 
 	retvm_if(in_key == NULL, VCONF_ERROR, "Invalid argument: key is null");
 
 	ret = _vconf_get_key_path(in_key, path);
 	retvm_if(ret != VCONF_OK, VCONF_ERROR, "Invalid argument: key is not valid");
+
+	retvm_if(access(path, F_OK) == -1, VCONF_ERROR, "Error : key(%s) is not exist", in_key);
 
 	do {
 		ret = remove(path);
@@ -1984,8 +2384,6 @@ API int vconf_unset(const char *in_key)
 			break;
 		}
 	} while(err_retry--);
-
-	INFO("vconf_unset success : %s", in_key);
 
 	END_TIME_CHECK
 
@@ -2004,12 +2402,14 @@ API int vconf_unset_recursive(const char *in_dir)
 	DIR *dir = NULL;
 	struct dirent entry;
 	struct dirent *result = NULL;
-	char fullpath[KEY_PATH] = {0,};
-	char dirpath[KEY_PATH] = {0,};
+	char fullpath[VCONF_KEY_PATH_LEN] = {0,};
+	char dirpath[VCONF_KEY_PATH_LEN] = {0,};
 	char err_buf[ERR_LEN] = {0,};
 	int rc = 0;
 	int func_ret = 0;
 	int ret = 0;
+
+	WARN("vconf_unset_recursive: %s. THIS API(vconf_unset_recursive) WILL BE DEPRECATED", in_dir);
 
 	retvm_if(in_dir == NULL, VCONF_ERROR, "Invalid argument: dir path is null");
 
@@ -2034,7 +2434,7 @@ API int vconf_unset_recursive(const char *in_dir)
 	            goto NEXT;
 		}
 
-		snprintf(fullpath,KEY_PATH, "%s/%s", dirpath, entry.d_name);
+		snprintf(fullpath,VCONF_KEY_PATH_LEN, "%s/%s", dirpath, entry.d_name);
 
 		ret = _vconf_path_is_dir(fullpath);
 		if(ret != VCONF_ERROR) {

@@ -1,7 +1,7 @@
 Name:       vconf
 Summary:    Configuration system library
-Version:    0.2.32
-Release:    1
+Version:    0.2.45
+Release:    2
 Group:      System/Libraries
 License:    Apache License, Version 2.0
 Source0:    %{name}-%{version}.tar.gz
@@ -42,7 +42,7 @@ Vconf key management header files
 %setup -q -n %{name}-%{version}
 
 %build
-cmake . -DCMAKE_INSTALL_PREFIX=%{_prefix}
+%cmake .
 
 make %{?jobs:-j%jobs}
 
@@ -55,11 +55,14 @@ mkdir -p %{buildroot}/etc/rc.d/rc4.d
 ln -sf /etc/rc.d/init.d/vconf-init %{buildroot}/etc/rc.d/rc3.d/S04vconf-init
 ln -sf /etc/rc.d/init.d/vconf-init %{buildroot}/etc/rc.d/rc4.d/S04vconf-init
 mkdir -p %{buildroot}/opt/var/kdb/db
-mkdir -p %{buildroot}%{_libdir}/systemd/system/basic.target.wants
-mkdir -p %{buildroot}%{_libdir}/tmpfiles.d
-install -m0644 %SOURCE1 %{buildroot}%{_libdir}/systemd/system/
-install -m0644 %SOURCE2 %{buildroot}%{_libdir}/tmpfiles.d/
-ln -sf ../vconf-setup.service %{buildroot}%{_libdir}/systemd/system/basic.target.wants/
+mkdir -p %{buildroot}/opt/var/kdb/db/.backup
+mkdir -p %{buildroot}/tmp
+touch %{buildroot}/tmp/vconf-initialized
+mkdir -p %{buildroot}%{_prefix}/lib/systemd/system/basic.target.wants
+mkdir -p %{buildroot}%{_prefix}/lib/tmpfiles.d
+install -m0644 %SOURCE1 %{buildroot}%{_prefix}/lib/systemd/system/
+install -m0644 %SOURCE2 %{buildroot}%{_prefix}/lib/tmpfiles.d/
+ln -sf ../vconf-setup.service %{buildroot}%{_prefix}/lib/systemd/system/basic.target.wants/
 mkdir -p %{buildroot}/usr/share/license
 install LICENSE.APLv2 %{buildroot}/usr/share/license/%{name}
 
@@ -77,13 +80,16 @@ systemctl daemon-reload
 %attr(755,root,root) %{_sysconfdir}/rc.d/init.d/vconf-init
 %{_sysconfdir}/rc.d/rc3.d/S04vconf-init
 %{_sysconfdir}/rc.d/rc4.d/S04vconf-init
+%attr(755,root,root) %{_sysconfdir}/preconf.d/vconf-setup
 %{_bindir}/vconftool
 %config(missingok) %attr(644,root,root) /opt/var/kdb/kdb_first_boot
 %{_libdir}/*.so.*
 %dir %attr(777,root,root) /opt/var/kdb/db
-%{_libdir}/systemd/system/basic.target.wants/vconf-setup.service
-%{_libdir}/systemd/system/vconf-setup.service
-%{_libdir}/tmpfiles.d/vconf-setup.conf
+%dir %attr(777,root,root) /opt/var/kdb/db/.backup
+/tmp/vconf-initialized
+%{_prefix}/lib/systemd/system/basic.target.wants/vconf-setup.service
+%{_prefix}/lib/systemd/system/vconf-setup.service
+%{_prefix}/lib/tmpfiles.d/vconf-setup.conf
 /usr/share/license/%{name}
 
 %files devel
