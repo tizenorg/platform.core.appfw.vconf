@@ -1237,13 +1237,13 @@ static int _vconf_set_key(keynode_t *keynode)
 						break;
 					}
 
-					ret = _vconf_set_key_check_parent_dir(path);
+					rc = _vconf_set_key_check_parent_dir(path);
 					if(rc != VCONF_OK) {
 						ERR("_vconf_set_key_check_parent_dir error : %s", path);
 						break;
 					}
 
-					ret = _vconf_set_key_creation(path);
+					rc = _vconf_set_key_creation(path);
 					if(rc != VCONF_OK) {
 						ERR("_vconf_set_key_creation error : %s", path);
 						break;
