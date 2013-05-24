@@ -15,6 +15,7 @@ BuildRequires:  pkgconfig(glib-2.0)
 BuildRequires:  pkgconfig(dlog)
 BuildRequires:  pkgconfig(vconf-internal-keys)
 BuildRequires:  pkgconfig(libtzplatform-config)
+BuildRequires:	pkgconfig(libsmack)
 
 %description 
 Configuration system library

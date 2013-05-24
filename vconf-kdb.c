@@ -372,7 +372,7 @@ _vconf_kdb_del_notify(const char *keyname, vconf_callback_fn cb)
 	noti_list = NULL;
 	noti_list = g_list_find_custom(g_notilist, &t, (GCompareFunc)_vconf_inoti_comp_with_wd);
 	if(noti_list == NULL) {
-		INFO("all noti for keyname(%s)/wd(%d) is removed", keyname, wd);
+		//INFO("all noti for keyname(%s)/wd(%d) is removed", keyname, wd);
 
 		r = inotify_rm_watch(_kdb_inoti_fd, wd);
 		if(r == -1) {

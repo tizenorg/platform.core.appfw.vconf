@@ -1442,7 +1442,7 @@ API int vconf_set_int(const char *in_key, const int intval)
 		ERR("vconf_set_int(%d) : %s(%d) error", getpid(), in_key, intval);
 		func_ret = VCONF_ERROR;
 	} else{
-		INFO("vconf_set_int(%d) : %s(%d) success", getpid(), in_key, intval);
+		INFO("%s(%d) success", in_key, intval);
 	}
 
 	_vconf_keynode_free(pKeyNode);
@@ -1481,7 +1481,7 @@ API int vconf_set_bool(const char *in_key, const int boolval)
 		ERR("vconf_set_bool(%d) : %s(%d) error", getpid(), in_key, boolval);
 		func_ret = VCONF_ERROR;
 	} else {
-		INFO("vconf_set_bool(%d) : %s(%d) success", getpid(), in_key, boolval);
+		INFO("%s(%d) success", in_key, boolval);
 	}
 
 	_vconf_keynode_free(pKeyNode);
@@ -1519,7 +1519,7 @@ API int vconf_set_dbl(const char *in_key, const double dblval)
 		ERR("vconf_set_dbl(%d) : %s(%f) error", getpid(), in_key, dblval);
 		func_ret = VCONF_ERROR;
 	} else {
-		INFO("vconf_set_dbl(%d) : %s(%f) success", getpid(), in_key, dblval);
+		INFO("%s(%f) success", in_key, dblval);
 	}
 
 	_vconf_keynode_free(pKeyNode);
@@ -1558,7 +1558,7 @@ API int vconf_set_str(const char *in_key, const char *strval)
 		ERR("vconf_set_str(%d) : %s(%s) error", getpid(), in_key, strval);
 		func_ret = VCONF_ERROR;
 	} else {
-		INFO("vconf_set_str(%d) : %s(%s) success", getpid(), in_key, strval);
+		INFO("%s(%s) success", in_key, strval);
 	}
 
 	_vconf_keynode_free(pKeyNode);
@@ -1583,8 +1583,6 @@ static int _vconf_get_key_elektra_format(keynode_t *keynode, FILE *fp)
 	char err_buf[100] = { 0, };
 	int func_ret = VCONF_OK;
 	char tmp;
-
-	INFO("_vconf_get_key_elektra_format start");
 
 	rewind(fp);
 
@@ -2238,7 +2236,7 @@ API int vconf_get_int(const char *in_key, int *intval)
 		*intval = pKeyNode->value.i;
 
 		if(pKeyNode->type == VCONF_TYPE_INT) {
-			INFO("vconf_get_int(%d) : %s(%d) success", getpid(), in_key, *intval);
+			//INFO("%s(%d) success", in_key, *intval);
 			func_ret = VCONF_OK;
 		} else
 			ERR("The type(%d) of keynode(%s) is not INT", pKeyNode->type, pKeyNode->keyname);
@@ -2276,7 +2274,7 @@ API int vconf_get_bool(const char *in_key, int *boolval)
 		*boolval = !!(pKeyNode->value.b);
 
 		if(pKeyNode->type == VCONF_TYPE_BOOL) {
-			INFO("vconf_get_bool(%d) : %s(%d) success", getpid(), in_key, *boolval);
+			//INFO("%s(%d) success", in_key, *boolval);
 			func_ret = VCONF_OK;
 		} else
 			ERR("The type(%d) of keynode(%s) is not BOOL", pKeyNode->type, pKeyNode->keyname);
@@ -2315,7 +2313,7 @@ API int vconf_get_dbl(const char *in_key, double *dblval)
 		*dblval = pKeyNode->value.d;
 
 		if(pKeyNode->type == VCONF_TYPE_DOUBLE) {
-			INFO("vconf_get_dbl(%d) : %s(%f) success", getpid(), in_key, *dblval);
+			//INFO("%s(%f) success", in_key, *dblval);
 			func_ret = VCONF_OK;
 		} else
 			ERR("The type(%d) of keynode(%s) is not DBL", pKeyNode->type, pKeyNode->keyname);
@@ -2358,7 +2356,7 @@ API char *vconf_get_str(const char *in_key)
 
 		if(tempstr)
 			strval = strdup(tempstr);
-		INFO("vconf_get_str(%d) : %s(%s) success", getpid(), in_key, strval);
+		//INFO("%s(%s) success", in_key, strval);
 	}
 
 	_vconf_keynode_free(pKeyNode);
@@ -2515,7 +2513,7 @@ API int vconf_notify_key_changed(const char *in_key, vconf_callback_fn cb, void 
 		return VCONF_ERROR;
 	}
 
-	INFO("vconf_notify_key_changed : %s noti is added", in_key);
+	//INFO("%s noti is added", in_key);
 
 	END_TIME_CHECK
 
@@ -2534,7 +2532,7 @@ API int vconf_ignore_key_changed(const char *in_key, vconf_callback_fn cb)
 		return VCONF_ERROR;
 	}
 
-	INFO("vconf_ignore_key_changed : %s noti removed", in_key);
+	//INFO("%s noti removed", in_key);
 
 	END_TIME_CHECK
 
