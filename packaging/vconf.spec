@@ -58,11 +58,11 @@ mkdir -p %{buildroot}/opt/var/kdb/db
 mkdir -p %{buildroot}/opt/var/kdb/db/.backup
 mkdir -p %{buildroot}/tmp
 touch %{buildroot}/tmp/vconf-initialized
-mkdir -p %{buildroot}%{_prefix}/lib/systemd/system/basic.target.wants
+mkdir -p %{buildroot}%{_unitdir}/basic.target.wants
 mkdir -p %{buildroot}%{_prefix}/lib/tmpfiles.d
-install -m0644 %SOURCE1 %{buildroot}%{_prefix}/lib/systemd/system/
+install -m0644 %SOURCE1 %{buildroot}%{_unitdir}/
 install -m0644 %SOURCE2 %{buildroot}%{_prefix}/lib/tmpfiles.d/
-ln -sf ../vconf-setup.service %{buildroot}%{_prefix}/lib/systemd/system/basic.target.wants/
+ln -sf ../vconf-setup.service %{buildroot}%{_unitdir}/basic.target.wants/
 mkdir -p %{buildroot}/usr/share/license
 install LICENSE.APLv2 %{buildroot}/usr/share/license/%{name}
 
@@ -87,8 +87,8 @@ systemctl daemon-reload
 %dir %attr(777,root,root) /opt/var/kdb/db
 %dir %attr(777,root,root) /opt/var/kdb/db/.backup
 /tmp/vconf-initialized
-%{_prefix}/lib/systemd/system/basic.target.wants/vconf-setup.service
-%{_prefix}/lib/systemd/system/vconf-setup.service
+%{_unitdir}/basic.target.wants/vconf-setup.service
+%{_unitdir}/vconf-setup.service
 %{_prefix}/lib/tmpfiles.d/vconf-setup.conf
 /usr/share/license/%{name}
 
