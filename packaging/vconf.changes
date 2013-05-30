@@ -1,0 +1,2 @@
+* Thu May 30 2013 Baptiste DURAND <baptiste.durand@eurogiciel.fr> accepted/tizen/20130520.100940@6482fb5
+- Fix lib path in pc file and use _unitdir macro in spec file
