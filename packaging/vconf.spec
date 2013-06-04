@@ -18,7 +18,7 @@ BuildRequires:  pkgconfig(vconf-internal-keys)
 Configuration system library
 
 %package devel
-Summary:    vconf (devel)
+Summary:    Vconf (devel)
 Group:      Development/Libraries
 Requires:   %{name} = %{version}-%{release}
 Requires:   pkgconfig(glib-2.0)
@@ -29,7 +29,7 @@ Requires:   vconf-keys-devel = %{version}-%{release}
 Vconf library (devel)
 
 %package keys-devel
-Summary:    vconf (devel)
+Summary:    Vconf (devel)
 Group:      Development/Libraries
 Requires:   %{name} = %{version}-%{release}
 Requires:   vconf = %{version}-%{release}
