@@ -1,2 +1,5 @@
+* Tue Jun 04 2013 Xavier Roche <xavrock.os@gmail.com> submit/tizen/20130530.131328@9c7069c
+- Fix rpmlint issue
+
 * Thu May 30 2013 Baptiste DURAND <baptiste.durand@eurogiciel.fr> accepted/tizen/20130520.100940@6482fb5
 - Fix lib path in pc file and use _unitdir macro in spec file
