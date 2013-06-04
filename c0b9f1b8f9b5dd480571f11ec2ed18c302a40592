@@ -1,0 +1,8 @@
+Change-Id: Ic0b9f1b8f9b5dd480571f11ec2ed18c302a40592
+Code-Review+2: Anas Nashif
+Verified+1: Xavier Roche <xavier.roche@eurogiciel.fr>
+Submitted-by: Anas Nashif
+Submitted-at: Tue, 04 Jun 2013 05:27:02 -0700
+Reviewed-on: https://review.tizen.org/gerrit/3800
+Project: platform/core/appfw/vconf
+Branch: refs/heads/tizen
