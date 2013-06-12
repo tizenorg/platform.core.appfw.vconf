@@ -347,17 +347,17 @@ static int copy_memory_key(char *pszKey, char *pszOrigin)
 static int make_file_path(char *pszKey, char *pszBuf)
 {
 	if (0 ==
-	    strncmp(pszKey, BACKEND_DB_PREFIX, sizeof(BACKEND_DB_PREFIX) - 1)) {
+	    strncmp(pszKey, BACKEND_DB_PREFIX, strlen(BACKEND_DB_PREFIX))) {
 		snprintf(pszBuf, BUFSIZE, "%s/%s", DB_PREFIX, pszKey);
 		return 0;
 	} else if (0 ==
 		   strncmp(pszKey, BACKEND_FILE_PREFIX,
-			   sizeof(BACKEND_FILE_PREFIX) - 1)) {
+			   strlen(BACKEND_FILE_PREFIX))) {
 		snprintf(pszBuf, BUFSIZE, "%s/%s", FILE_PREFIX, pszKey);
 		return 0;
 	} else if (0 ==
 		   strncmp(pszKey, BACKEND_MEMORY_PREFIX,
-			   sizeof(BACKEND_MEMORY_PREFIX) - 1)) {
+			   strlen(BACKEND_MEMORY_PREFIX))) {
 		snprintf(pszBuf, BUFSIZE, "%s/%s", MEMORY_PREFIX, pszKey);
 		return 0;
 	}

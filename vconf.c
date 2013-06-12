@@ -587,11 +587,11 @@ API int vconf_keylist_del(keylist_t *keylist, const char *keyname)
 
 int _vconf_get_key_prefix(const char *keyname, int *prefix)
 {
-	if (strncmp(keyname, BACKEND_DB_PREFIX, sizeof(BACKEND_DB_PREFIX) - 1) == 0) {
+	if (strncmp(keyname, BACKEND_DB_PREFIX, strlen(BACKEND_DB_PREFIX)) == 0) {
 		*prefix = VCONF_BACKEND_DB;
-	} else if (0 == strncmp(keyname, BACKEND_FILE_PREFIX, sizeof(BACKEND_FILE_PREFIX) - 1)) {
+	} else if (0 == strncmp(keyname, BACKEND_FILE_PREFIX, strlen(BACKEND_FILE_PREFIX))) {
 		*prefix = VCONF_BACKEND_FILE;
-	} else if (0 == strncmp(keyname, BACKEND_MEMORY_PREFIX, sizeof(BACKEND_MEMORY_PREFIX) - 1)) {
+	} else if (0 == strncmp(keyname, BACKEND_MEMORY_PREFIX, strlen(BACKEND_MEMORY_PREFIX))) {
 		*prefix = VCONF_BACKEND_MEMORY;
 	} else {
 		ERR("Invalid argument: wrong prefix of key(%s)", keyname);
@@ -604,11 +604,11 @@ int _vconf_get_key_prefix(const char *keyname, int *prefix)
 
 int _vconf_get_key_path(const char *keyname, char *path)
 {
-	if (strncmp(keyname, BACKEND_DB_PREFIX, sizeof(BACKEND_DB_PREFIX) - 1) == 0) {
+	if (strncmp(keyname, BACKEND_DB_PREFIX, strlen(BACKEND_DB_PREFIX)) == 0) {
 		snprintf(path, VCONF_KEY_PATH_LEN, "%s%s", BACKEND_SYSTEM_DIR, keyname);
-	} else if (0 == strncmp(keyname, BACKEND_FILE_PREFIX, sizeof(BACKEND_FILE_PREFIX) - 1)) {
+	} else if (0 == strncmp(keyname, BACKEND_FILE_PREFIX, strlen(BACKEND_FILE_PREFIX))) {
 		snprintf(path, VCONF_KEY_PATH_LEN, "%s%s", BACKEND_SYSTEM_DIR, keyname);
-	} else if (0 == strncmp(keyname, BACKEND_MEMORY_PREFIX, sizeof(BACKEND_MEMORY_PREFIX) - 1)) {
+	} else if (0 == strncmp(keyname, BACKEND_MEMORY_PREFIX, strlen(BACKEND_MEMORY_PREFIX))) {
 		snprintf(path, VCONF_KEY_PATH_LEN, "%s%s", BACKEND_MEMORY_DIR, keyname);
 	} else {
 		ERR("Invalid argument: wrong prefix of key(%s)", keyname);
