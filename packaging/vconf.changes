@@ -1,3 +1,6 @@
+* Wed Jun 26 2013 Maciej Wereski <m.wereski@partner.samsung.com>
+- Improve path dependency
+
 * Fri Jul 05 2013 Junfeng Dong <junfeng.dong@intel.com> accepted/tizen/20130627.194918@56c355e
 - make vconf-setup service after local-fs.target
 
