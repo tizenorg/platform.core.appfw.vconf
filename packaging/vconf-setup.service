@@ -1,7 +1,10 @@
-
 [Unit]
 Description=Initialize the VConf storage
 DefaultDependencies=no
+<<<<<<< HEAD
+=======
+RequiresMountsFor=/var/run
+>>>>>>> 57306cd... Improve path dependency
 Before=basic.target
 After=local-fs.target
 
