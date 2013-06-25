@@ -1,9 +1,8 @@
-
 [Unit]
 Description=Initialize the VConf storage
 DefaultDependencies=no
+RequiresMountsFor=/var/run
 Before=basic.target
-After=local-fs.target
 
 [Service]
 Type=oneshot
