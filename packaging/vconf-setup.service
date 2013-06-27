@@ -2,8 +2,6 @@
 [Unit]
 Description=Initialize the VConf storage
 DefaultDependencies=no
-After=var-run.mount
-Requires=var-run.mount
 Before=basic.target
 
 [Service]

@@ -1,3 +1,6 @@
+* Thu Jun 27 2013 Rusty Lynch <rusty.lynch@intel.com> submit/tizen/20130620.090141@6700abc
+- Remove ghost ref to nonexisting var-run.mount
+
 * Wed Jun 12 2013 Victor Hakoun <victor.hakoun@eurogiciel.fr> accepted/tizen/20130604.123334@ee4fcd1
 - Fix possible memory leak
 - Fix string manipulation in x86_64 runtime
