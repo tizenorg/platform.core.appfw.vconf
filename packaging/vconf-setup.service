@@ -3,6 +3,7 @@
 Description=Initialize the VConf storage
 DefaultDependencies=no
 Before=basic.target
+After=local-fs.target
 
 [Service]
 Type=oneshot
