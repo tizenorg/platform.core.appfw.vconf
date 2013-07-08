@@ -7,6 +7,7 @@ License:    Apache License, Version 2.0
 Source0:    %{name}-%{version}.tar.gz
 Source1:    vconf-setup.service
 Source2:    vconf-setup.conf
+Source1001: 	vconf.manifest
 Requires(post): /sbin/ldconfig, systemd
 Requires(postun): /sbin/ldconfig, systemd
 BuildRequires:  cmake
@@ -40,6 +41,7 @@ Vconf key management header files
 
 %prep
 %setup -q -n %{name}-%{version}
+cp %{SOURCE1001} .
 
 %build
 %cmake .
@@ -75,7 +77,7 @@ systemctl daemon-reload
 systemctl daemon-reload
 
 %files
-%manifest vconf.manifest
+%manifest %{name}.manifest
 %defattr(-,root,root,-)
 %attr(755,root,root) %{_sysconfdir}/rc.d/init.d/vconf-init
 %{_sysconfdir}/rc.d/rc3.d/S04vconf-init
@@ -93,12 +95,14 @@ systemctl daemon-reload
 /usr/share/license/%{name}
 
 %files devel
+%manifest %{name}.manifest
 %defattr(-,root,root,-)
 %{_includedir}/vconf/vconf.h
 %{_libdir}/pkgconfig/*.pc
 %{_libdir}/*.so
 
 %files keys-devel
+%manifest %{name}.manifest
 %defattr(-,root,root,-)
 %{_includedir}/vconf/vconf-keys.h
 
