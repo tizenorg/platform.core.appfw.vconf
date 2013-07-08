@@ -1,0 +1,8 @@
+Change-Id: I21773e24bdfb5e2717f5e381cc5ebde05360b086
+Code-Review+2: Ryan Ware <ware@linux.intel.com>
+Verified+1: Ryan Ware <ware@linux.intel.com>
+Submitted-by: Ryan Ware <ware@linux.intel.com>
+Submitted-at: Mon, 08 Jul 2013 09:37:49 -0700
+Reviewed-on: https://review.tizen.org/gerrit/5162
+Project: platform/core/appfw/vconf
+Branch: refs/heads/tizen
