@@ -1,0 +1,10 @@
+Change-Id: I6ee529f37dd1d27d1bf425c2966e599ef8de84ce
+Code-Review+2: Ryan Ware <ware@linux.intel.com>
+Verified+1: Ryan Ware <ware@linux.intel.com>
+Code-Review+1: Elena Reshetova <elena.reshetova@intel.com>
+Verified+1: Elena Reshetova <elena.reshetova@intel.com>
+Submitted-by: Ryan Ware <ware@linux.intel.com>
+Submitted-at: Mon, 08 Jul 2013 09:36:22 -0700
+Reviewed-on: https://review.tizen.org/gerrit/5438
+Project: platform/core/appfw/vconf
+Branch: refs/heads/tizen
