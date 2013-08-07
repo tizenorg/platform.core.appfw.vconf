@@ -1,3 +1,6 @@
+* Wed Aug 07 2013 Baptiste DURAND <baptiste.durand@eurogiciel.fr> accepted/tizen/20130705.112431@825db83
+- Add systemd_activation_on_demand build option
+
 * Fri Jul 05 2013 Junfeng Dong <junfeng.dong@intel.com> accepted/tizen/20130627.194918@56c355e
 - make vconf-setup service after local-fs.target
 
