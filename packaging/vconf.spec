@@ -1,3 +1,4 @@
+%bcond_with systemd_activation_on_demand
 Name:       vconf
 Summary:    Configuration system library
 Version:    0.2.45
@@ -13,6 +14,10 @@ BuildRequires:  cmake
 BuildRequires:  pkgconfig(glib-2.0)
 BuildRequires:  pkgconfig(dlog)
 BuildRequires:  pkgconfig(vconf-internal-keys)
+%if %{with systemd_activation_on_demand}
+BuildRequires:  pkgconfig(dbus-glib-1)
+BuildRequires:  pkgconfig(libsystemd-daemon)
+%endif
 
 %description 
 Configuration system library
@@ -42,8 +47,11 @@ Vconf key management header files
 %setup -q -n %{name}-%{version}
 
 %build
+%if %{with systemd_activation_on_demand}
+%cmake . -DENABLE_VCONF_SYSTEMD_INIT_ONDEMAND=On
+%else
 %cmake .
-
+%endif
 make %{?jobs:-j%jobs}
 
 %install
@@ -57,6 +65,8 @@ ln -sf /etc/rc.d/init.d/vconf-init %{buildroot}/etc/rc.d/rc4.d/S04vconf-init
 mkdir -p %{buildroot}/opt/var/kdb/db
 mkdir -p %{buildroot}/opt/var/kdb/db/.backup
 mkdir -p %{buildroot}/tmp
+
+
 touch %{buildroot}/tmp/vconf-initialized
 mkdir -p %{buildroot}%{_unitdir}/basic.target.wants
 mkdir -p %{buildroot}%{_prefix}/lib/tmpfiles.d
@@ -86,8 +96,13 @@ systemctl daemon-reload
 %{_libdir}/*.so.*
 %dir %attr(777,root,root) /opt/var/kdb/db
 %dir %attr(777,root,root) /opt/var/kdb/db/.backup
+%if %{with systemd_activation_on_demand}
+%exclude /tmp/vconf-initialized
+%exclude %{_unitdir}/basic.target.wants/vconf-setup.service
+%else
 /tmp/vconf-initialized
 %{_unitdir}/basic.target.wants/vconf-setup.service
+%endif
 %{_unitdir}/vconf-setup.service
 %{_prefix}/lib/tmpfiles.d/vconf-setup.conf
 /usr/share/license/%{name}

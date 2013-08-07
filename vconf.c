@@ -29,7 +29,14 @@
 #include <sys/stat.h>
 #include <sys/xattr.h>
 #include <ctype.h>
+#ifdef VCONF_SYSTEMD_INIT_ONDEMAND
+#include <dbus/dbus.h>
+#include <dbus/dbus-glib.h>
+#include <sys/inotify.h>
+#define EVENT_SIZE  ( sizeof (struct inotify_event) )
+#define EVENT_BUF_LEN     ( EVENT_SIZE + FILENAME_MAX )
 
+#endif
 #ifndef API
 #define API __attribute__ ((visibility("default")))
 #endif
@@ -51,6 +58,110 @@ do{\
 }while(0)
 
 __thread int is_transaction;
+#endif
+
+
+#ifdef VCONF_SYSTEMD_INIT_ONDEMAND
+
+#define BUS_NAME_SYSTEMD "org.freedesktop.systemd1"
+#define INTERFACE_NAME_SYSTEMD_UNIT "org.freedesktop.systemd1.Unit"
+#define INTERFACE_NAME_SYSTEMD_MANAGER "org.freedesktop.systemd1.Manager"
+#define PATH_NAME_SYSTEMD "/org/freedesktop/systemd1"
+
+
+static int notify_systemd_vconf_init(void)
+{
+	DBusGConnection*  system_conn;
+	DBusGProxy *proxy;
+	GError *err = NULL;
+	int res = VCONF_ERROR;
+	char *service_path = NULL;
+
+	system_conn = dbus_g_bus_get(DBUS_BUS_SYSTEM, NULL);
+	if (system_conn == NULL) return res;
+
+	proxy = dbus_g_proxy_new_for_name(system_conn, BUS_NAME_SYSTEMD, PATH_NAME_SYSTEMD, INTERFACE_NAME_SYSTEMD_MANAGER);
+	if (proxy == NULL)
+		return VCONF_ERROR;
+
+	if (!dbus_g_proxy_call(proxy, "GetUnit", &err, G_TYPE_STRING, "vconf-setup.service", G_TYPE_INVALID, DBUS_TYPE_G_OBJECT_PATH, &service_path, G_TYPE_INVALID)) {
+		if (err != NULL) {
+			ERR("GetUnit  failed [%s]\n", err->message);
+			g_error_free(err);
+		} else
+			ERR("GetUnit  failed");
+	} else {
+		res = VCONF_OK;
+		INFO("Service path is : %s " ,service_path);
+	}
+
+	g_object_unref(proxy);
+	if( res == VCONF_ERROR )
+		return res;
+
+	res = VCONF_ERROR;
+	proxy = dbus_g_proxy_new_for_name(system_conn, BUS_NAME_SYSTEMD, service_path , INTERFACE_NAME_SYSTEMD_UNIT);
+	if (proxy == NULL) {
+		free(service_path);
+		return VCONF_ERROR;
+	}
+
+	free(service_path);
+	if (!dbus_g_proxy_call(proxy, "Start", &err, G_TYPE_STRING, "fail", G_TYPE_INVALID, DBUS_TYPE_G_OBJECT_PATH, &service_path, G_TYPE_INVALID)) {
+		if (err != NULL) {
+			ERR("Start  failed: [%s]\n", err->message);
+			g_error_free(err);
+		} else
+			ERR("Start  failed !\n");
+	} else {
+		res = VCONF_OK;
+		INFO("job object path is : %s " ,service_path);
+	}
+	g_object_unref(proxy);
+	free(service_path);
+	return res;
+}
+
+static int wait_vconf_setup(void)
+{
+	int fd;
+	int inotify_watch;
+	int length = 0;
+	char buff[EVENT_BUF_LEN] = {0};
+	int res = VCONF_OK;
+	fd = inotify_init();
+	if ( fd < 0 ) {
+		ERR( "Couldn't initialize inotify");
+	}
+	inotify_watch = inotify_add_watch(fd, "/tmp/", IN_CREATE );
+	if ( inotify_watch < 0 ) {
+		ERR( "Couldn't add watch handler inotify");
+		close( fd );
+		return VCONF_ERROR;
+	}
+
+	while (VCONF_NOT_INITIALIZED) {
+		length = read (fd, buff, EVENT_BUF_LEN);
+		if ( length < 0 ) {
+			ERR( "Fail to read in inotify socket");
+			res = VCONF_ERROR;
+			break;
+		}
+		//There is no needs to check the event. File creation is tested in while condition
+	}
+	inotify_rm_watch( fd, inotify_watch );
+	close( fd );
+	return res;
+}
+
+static int launch_vconf_setup_init(void)
+{
+	int res = VCONF_OK;
+	if ( (notify_systemd_vconf_init() != VCONF_OK ) || ( wait_vconf_setup() != VCONF_OK))
+		res = VCONF_ERROR;
+
+	return res;
+}
 #endif
 
 #ifdef VCONF_TIMECHECK
@@ -1038,8 +1149,14 @@ static int _vconf_set_key_filesys(keynode_t *keynode, int prefix)
 	retv_if(ret != VCONF_OK, ret);
 
 	if(prefix == VCONF_BACKEND_MEMORY && VCONF_NOT_INITIALIZED) {
-		func_ret = VCONF_ERROR_NOT_INITIALIZED;
-		goto out_return;
+#ifdef	VCONF_SYSTEMD_INIT_ONDEMAND
+		if(launch_vconf_setup_init() == VCONF_ERROR) {
+#endif
+			func_ret = VCONF_ERROR_NOT_INITIALIZED;
+			goto out_return;
+#ifdef	VCONF_SYSTEMD_INIT_ONDEMAND
+		}
+#endif
 	}
 
 #ifdef VCONF_USE_BACKUP_TRANSACTION
@@ -1216,10 +1333,16 @@ static int _vconf_set_key(keynode_t *keynode)
 		is_busy_err = 0;
 		retry++;
 
-		if(VCONF_NOT_INITIALIZED)
-		{
+		if(prefix == VCONF_BACKEND_MEMORY && VCONF_NOT_INITIALIZED) {
+#ifdef	VCONF_SYSTEMD_INIT_ONDEMAND
+		if(launch_vconf_setup_init() == VCONF_ERROR) {
+#endif
 			ERR("%s : vconf is not initialized\n", keynode->keyname);
 			is_busy_err = 1;
+#ifdef	VCONF_SYSTEMD_INIT_ONDEMAND
+		}
+#endif
+
 		}
 		else if(ret == VCONF_ERROR_FILE_OPEN)
 		{
@@ -1712,10 +1835,15 @@ static int _vconf_get_key_filesys(keynode_t *keynode, int prefix)
 	ret = _vconf_get_key_path(keynode->keyname, path);
 	retv_if(ret != VCONF_OK, ret);
 
-	if(prefix == VCONF_BACKEND_MEMORY && VCONF_NOT_INITIALIZED)
-	{
-		func_ret = VCONF_ERROR_NOT_INITIALIZED;
-		goto out_return;
+	if(prefix == VCONF_BACKEND_MEMORY && VCONF_NOT_INITIALIZED)	{
+#ifdef	VCONF_SYSTEMD_INIT_ONDEMAND
+		if(launch_vconf_setup_init() == VCONF_ERROR) {
+#endif
+			func_ret = VCONF_ERROR_NOT_INITIALIZED;
+			goto out_return;
+#ifdef	VCONF_SYSTEMD_INIT_ONDEMAND
+		}
+#endif
 	}
 
 #ifdef VCONF_USE_BACKUP_TRANSACTION
