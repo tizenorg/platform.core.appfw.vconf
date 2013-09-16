@@ -6,7 +6,7 @@ Before=basic.target
 
 [Service]
 Type=oneshot
-ExecStart=/etc/rc.d/init.d/vconf-init
+ExecStart=/usr/bin/vconf-init
 
 [Install]
 WantedBy=basic.target
