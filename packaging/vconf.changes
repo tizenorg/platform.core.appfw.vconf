@@ -1,11 +1,11 @@
-* Wed Jun 26 2013 Maciej Wereski <m.wereski@partner.samsung.com>
-- Improve path dependency
-
 * Fri Jul 05 2013 Junfeng Dong <junfeng.dong@intel.com> accepted/tizen/20130627.194918@56c355e
 - make vconf-setup service after local-fs.target
 
 * Thu Jun 27 2013 Rusty Lynch <rusty.lynch@intel.com> submit/tizen/20130620.090141@6700abc
 - Remove ghost ref to nonexisting var-run.mount
+
+* Wed Jun 26 2013 Maciej Wereski <m.wereski@partner.samsung.com>
+- Improve path dependency
 
 * Wed Jun 12 2013 Victor Hakoun <victor.hakoun@eurogiciel.fr> accepted/tizen/20130604.123334@ee4fcd1
 - Fix possible memory leak
