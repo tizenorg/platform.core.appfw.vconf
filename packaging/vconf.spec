@@ -105,21 +105,3 @@ systemctl daemon-reload
 %manifest %{name}.manifest
 %defattr(-,root,root,-)
 %{_includedir}/vconf/vconf-keys.h
-
-%changelog
-* Tue Oct 23 2012 - SeungYeup Kim <sy2004.kim@samsung.com>
-- Add thread safe code
-
-* Tue Sep 18 2012 - SeungYeup Kim <sy2004.kim@samsung.com>
-- Add 4 public keys (Browser User Agent)
-
-* Tue Aug 28 2012 - SeungYeup Kim <sy2004.kim@samsung.com>
-- Remove memory leak
-- Remove use after free
-
-* Tue Aug 14 2012 - Hyungdeuk Kim <hd3.kim@samsung.com>
-- Fix issues related prevent
-- Fix warning msg at build time
-
-* Mon Jul 23 2012 - SeungYeup Kim <sy2004.kim@samsung.com>
-- Enable -f option for force update
