@@ -1,0 +1,7 @@
+Code-Review+2: Patrick McCarty <patrick.mccarty@linux.intel.com>
+Verified+1: Anas Nashif <anas.nashif@intel.com>
+Submitted-by: Anas Nashif <anas.nashif@intel.com>
+Submitted-at: Wed, 18 Sep 2013 09:05:23 -0700
+Reviewed-on: https://review.tizen.org/gerrit/10057
+Project: platform/core/appfw/vconf
+Branch: refs/heads/tizen
