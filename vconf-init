@@ -9,3 +9,4 @@ set -e
 
 
 cp -a ${TZ_SYS_CONFIG}/memory_init/memory/* /var/run/memory
+find ${TZ_SYS_CONFIG}/memory_init/memory/ -type d -print0 | xargs -0 chsmack -t
