@@ -50,6 +50,8 @@ make %{?jobs:-j%jobs}
 %make_install
 mkdir -p %{buildroot}/opt/var/kdb/db
 mkdir -p %{buildroot}/opt/var/kdb/db/.backup
+mkdir -p %{buildroot}/tmp
+touch %{buildroot}/tmp/vconf-initialized
 mkdir -p %{buildroot}%{_unitdir}/basic.target.wants
 mkdir -p %{buildroot}%{_prefix}/lib/tmpfiles.d
 install -m0644 %SOURCE1 %{buildroot}%{_unitdir}/
@@ -75,6 +77,7 @@ systemctl daemon-reload
 %{_libdir}/*.so.*
 %dir %attr(777,root,root) /opt/var/kdb/db
 %dir %attr(777,root,root) /opt/var/kdb/db/.backup
+/tmp/vconf-initialized
 %{_unitdir}/basic.target.wants/vconf-setup.service
 %{_unitdir}/vconf-setup.service
 %{_prefix}/lib/tmpfiles.d/vconf-setup.conf
