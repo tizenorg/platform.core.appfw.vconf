@@ -1,3 +1,6 @@
+* Web Sep 25 2013 Chengwei Yang <chengwei.yang@intel.com>
+- Fix can not write memory backend key at image creation stage
+
 * Fri Sep 20 2013 Anas Nashif <anas.nashif@intel.com> accepted/tizen/20130913.063407@c8eb1a2
 - cleanup spec and changelog
 

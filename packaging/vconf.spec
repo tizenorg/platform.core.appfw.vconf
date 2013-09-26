@@ -57,6 +57,7 @@ install -m0644 %SOURCE2 %{buildroot}%{_prefix}/lib/tmpfiles.d/
 ln -sf ../vconf-setup.service %{buildroot}%{_unitdir}/basic.target.wants/
 
 %post
+touch /tmp/vconf-initialized
 /sbin/ldconfig
 systemctl daemon-reload
 
