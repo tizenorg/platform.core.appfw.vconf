@@ -7,4 +7,3 @@ set -e
 
 
 cp -a /opt/var/kdb/memory_init/memory/* /var/run/memory
-touch /tmp/vconf-initialized
