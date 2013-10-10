@@ -37,8 +37,6 @@
 #define VCONF_ERROR_RETRY_CNT 20
 #define VCONF_ERROR_RETRY_SLEEP_UTIME 10000
 
-#define VCONF_NOT_INITIALIZED (access("/tmp/vconf-initialized", F_OK) == -1)
-
 #ifdef VCONF_USE_SQLFS_TRANSACTION
 int IN_SBOX=0;
 
@@ -1037,11 +1035,6 @@ static int _vconf_set_key_filesys(keynode_t *keynode, int prefix)
 	ret = _vconf_get_key_path(keynode->keyname, path);
 	retv_if(ret != VCONF_OK, ret);
 
-	if(prefix == VCONF_BACKEND_MEMORY && VCONF_NOT_INITIALIZED) {
-		func_ret = VCONF_ERROR_NOT_INITIALIZED;
-		goto out_return;
-	}
-
 #ifdef VCONF_USE_BACKUP_TRANSACTION
 	if(prefix == VCONF_BACKEND_DB && keynode->type == VCONF_TYPE_STRING) {
 		_vconf_get_backup_path(keynode->keyname, backup_path);
@@ -1216,12 +1209,7 @@ static int _vconf_set_key(keynode_t *keynode)
 		is_busy_err = 0;
 		retry++;
 
-		if(VCONF_NOT_INITIALIZED)
-		{
-			ERR("%s : vconf is not initialized\n", keynode->keyname);
-			is_busy_err = 1;
-		}
-		else if(ret == VCONF_ERROR_FILE_OPEN)
+		if(ret == VCONF_ERROR_FILE_OPEN)
 		{
 			switch (errno)
 			{
@@ -1712,12 +1700,6 @@ static int _vconf_get_key_filesys(keynode_t *keynode, int prefix)
 	ret = _vconf_get_key_path(keynode->keyname, path);
 	retv_if(ret != VCONF_OK, ret);
 
-	if(prefix == VCONF_BACKEND_MEMORY && VCONF_NOT_INITIALIZED)
-	{
-		func_ret = VCONF_ERROR_NOT_INITIALIZED;
-		goto out_return;
-	}
-
 #ifdef VCONF_USE_BACKUP_TRANSACTION
 	if(prefix == VCONF_BACKEND_DB) {
 		_vconf_get_backup_path(keynode->keyname, backup_path);
@@ -1912,12 +1894,7 @@ int _vconf_get_key(keynode_t *keynode)
 		is_busy_err = 0;
 		retry++;
 
-		if(VCONF_NOT_INITIALIZED)
-		{
-			ERR("%s : vconf is not initialized\n", keynode->keyname);
-			is_busy_err = 1;
-		}
-		else if(ret == VCONF_ERROR_FILE_OPEN)
+		if(ret == VCONF_ERROR_FILE_OPEN)
 		{
 			switch (errno)
 			{
