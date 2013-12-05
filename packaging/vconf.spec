@@ -1,7 +1,7 @@
 Name:       vconf
 Summary:    Configuration system library
-Version:    0.2.45
-Release:    3
+Version:    0.2.51
+Release:    1
 Group:      System/Libraries
 License:    Apache-2.0
 Source0:    %{name}-%{version}.tar.gz
@@ -14,6 +14,7 @@ BuildRequires:  cmake
 BuildRequires:  pkgconfig(glib-2.0)
 BuildRequires:  pkgconfig(dlog)
 BuildRequires:  pkgconfig(vconf-internal-keys)
+BuildRequires:	  pkgconfig(libsmack)
 
 %description 
 Configuration system library
