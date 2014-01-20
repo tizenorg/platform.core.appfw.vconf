@@ -485,8 +485,6 @@ static void get_operation(char *input)
 
 static void recursive_get(char *subDIR, int level)
 {
-	printf("%s", subDIR);
-
 	keylist_t *get_keylist;
 	keynode_t *first_node;
 
