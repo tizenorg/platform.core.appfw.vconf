@@ -156,6 +156,7 @@ static keynode_t *_vconf_keylist_lookup(keylist_t *keylist, const char *keyname,
 				 keynode_t **before_keynode)
 {
 	keynode_t *found_node, *temp_node = NULL;
+	size_t length = 1 + strlen(keyname);
 
 	found_node = _vconf_keylist_headnode(keylist);
 
@@ -165,7 +166,7 @@ static keynode_t *_vconf_keylist_lookup(keylist_t *keylist, const char *keyname,
 			return NULL;
 		}
 
-		if (!strncmp(keyname, found_node->keyname, strlen(keyname))) {
+		if (!memcmp(keyname, found_node->keyname, length)) {
 			if (before_keynode) {
 					*before_keynode = temp_node;
 			}
