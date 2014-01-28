@@ -1,0 +1,12 @@
+Code-Review+2: Casey Schaufler <casey.schaufler@intel.com>
+Code-Review+1: Patrick McCarty <patrick.mccarty@linux.intel.com>
+Verified+1: José Bollo <jose.bollo@open.eurogiciel.org>
+Code-Review+1: Baptiste DURAND <baptiste.durand@open.eurogiciel.org>
+Code-Review+1: Stephane Desneux <stephane.desneux@open.eurogiciel.org>
+Verified+1: Stephane Desneux <stephane.desneux@open.eurogiciel.org>
+Code-Review+1: Kévin THIERRY <kevin.thierry@open.eurogiciel.org>
+Submitted-by: Casey Schaufler <casey.schaufler@intel.com>
+Submitted-at: Tue, 28 Jan 2014 07:14:51 -0800
+Reviewed-on: https://review.tizen.org/gerrit/15394
+Project: platform/core/appfw/vconf
+Branch: refs/heads/tizen
