@@ -33,7 +33,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <errno.h>
-
+#include <tzplatform_config.h>
 #include <wordexp.h>
 
 enum {
@@ -45,15 +45,15 @@ enum {
 };
 
 #define BUFSIZE		1024
+#define DB_PREFIX tzplatform_getenv(TZ_SYS_CONFIG)
+#define FILE_PREFIX tzplatform_getenv(TZ_SYS_CONFIG)
+#define MEMORY_INIT tzplatform_mkpath(TZ_SYS_CONFIG,"memory_init")
 
 const char *BACKEND_DB_PREFIX = "db/";
 const char *BACKEND_FILE_PREFIX = "file/";
 const char *BACKEND_MEMORY_PREFIX = "memory/";
 
-const char *DB_PREFIX = "/opt/var/kdb";
-const char *FILE_PREFIX = "/opt/var/kdb";
 const char *MEMORY_PREFIX = "/var/run";
-const char *MEMORY_INIT = "/opt/var/kdb/memory_init";
 
 static char *guid = NULL;
 static char *uid = NULL;

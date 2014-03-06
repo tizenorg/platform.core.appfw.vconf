@@ -29,6 +29,7 @@
 #include <sys/stat.h>
 #include <sys/xattr.h>
 #include <ctype.h>
+#include <tzplatform_config.h>
 
 #ifndef API
 #define API __attribute__ ((visibility("default")))
@@ -40,11 +41,11 @@
 #ifdef VCONF_USE_SQLFS_TRANSACTION
 int IN_SBOX=0;
 
-#define VCONF_MOUNT_PATH "/opt/var/kdb/db"
+#define VCONF_MOUNT_PATH tzplatform_mkpath(TZ_SYS_CONFIG,"db")
 #define VCONF_MOUNT_PATH_CHECK \
 do{\
 	if(!IN_SBOX) \
-      IN_SBOX = access("/opt/var/kdb/kdb_first_boot", F_OK) + 2; \
+      IN_SBOX = access(tzplatform_mkpath(TZ_SYS_CONFIG,"kdb_first_boot"), F_OK) + 2; \
    	if(2==IN_SBOX) return 0;\
 }while(0)
 

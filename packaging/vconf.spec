@@ -14,6 +14,7 @@ BuildRequires:  cmake
 BuildRequires:  pkgconfig(glib-2.0)
 BuildRequires:  pkgconfig(dlog)
 BuildRequires:  pkgconfig(vconf-internal-keys)
+BuildRequires:  pkgconfig(libtzplatform-config)
 
 %description 
 Configuration system library
@@ -42,14 +43,15 @@ Vconf key management header files
 cp %{SOURCE1001} .
 
 %build
-%cmake .
+%cmake . \
+	-DTZ_SYS_CONFIG=%{TZ_SYS_CONFIG}
 
 make %{?jobs:-j%jobs}
 
 %install
 %make_install
-mkdir -p %{buildroot}/opt/var/kdb/db
-mkdir -p %{buildroot}/opt/var/kdb/db/.backup
+mkdir -p %{buildroot}%{TZ_SYS_CONFIG}/db
+mkdir -p %{buildroot}%{TZ_SYS_CONFIG}/db/.backup
 mkdir -p %{buildroot}%{_unitdir}/basic.target.wants
 mkdir -p %{buildroot}%{_prefix}/lib/tmpfiles.d
 install -m0644 %SOURCE1 %{buildroot}%{_unitdir}/
@@ -71,10 +73,10 @@ systemctl daemon-reload
 %attr(755,root,root) %{_sysconfdir}/preconf.d/vconf-setup
 %{_bindir}/vconftool
 %{_bindir}/vconf-init
-%config(missingok) %attr(644,root,root) /opt/var/kdb/kdb_first_boot
+%config(missingok) %attr(644,root,root) %{TZ_SYS_CONFIG}/kdb_first_boot
 %{_libdir}/*.so.*
-%dir %attr(777,root,root) /opt/var/kdb/db
-%dir %attr(777,root,root) /opt/var/kdb/db/.backup
+%dir %attr(777,root,root) %{TZ_SYS_CONFIG}/db
+%dir %attr(777,root,root) %{TZ_SYS_CONFIG}/db/.backup
 %{_unitdir}/basic.target.wants/vconf-setup.service
 %{_unitdir}/vconf-setup.service
 %{_prefix}/lib/tmpfiles.d/vconf-setup.conf
