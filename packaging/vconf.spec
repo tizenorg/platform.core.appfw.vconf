@@ -40,6 +40,7 @@ Vconf key management header files
 
 %prep
 %setup -q -n %{name}-%{version}
+sed -i 's|TZ_SYS_CONFIG|%{TZ_SYS_CONFIG}|g' %{SOURCE1001}
 cp %{SOURCE1001} .
 
 %build
@@ -75,7 +76,7 @@ systemctl daemon-reload
 %{_bindir}/vconf-init
 %config(missingok) %attr(644,root,root) %{TZ_SYS_CONFIG}/kdb_first_boot
 %{_libdir}/*.so.*
-%dir %attr(777,root,root) %{TZ_SYS_CONFIG}/db
+%dir %attr(777,root,%TZ_SYS_USER_GROUP) %{TZ_SYS_CONFIG}/db
 %dir %attr(777,root,root) %{TZ_SYS_CONFIG}/db/.backup
 %{_unitdir}/basic.target.wants/vconf-setup.service
 %{_unitdir}/vconf-setup.service
