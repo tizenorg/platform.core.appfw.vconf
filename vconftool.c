@@ -242,10 +242,16 @@ static int check_file_path_mode(char* file_path)
 		if (access(szPath, F_OK) != 0) {
 			/* fprintf(stderr,"parent dir does not exist\n"); */
 
-			snprintf(szCmd, BUFSIZE, "/bin/mkdir %s -p --mode=755", szPath);
+			snprintf(szCmd, BUFSIZE, "/bin/mkdir %s -p --mode=775", szPath);
 			disable_invalid_char(szCmd);
 			if (__system(szCmd)) {
 				fprintf(stderr,"[%s:%d]Fail mkdir() szCmd=%s\n", __FILE__, __LINE__, szCmd);
+				return -1;
+			}
+
+			snprintf(szCmd, BUFSIZE, "/bin/chgrp %s %s",tzplatform_getenv(TZ_SYS_USER_GROUP), szPath);
+			if (__system(szCmd)) {
+				fprintf(stderr,"[%s:%d]Fail chgrp() szCmd=%s\n", __FILE__, __LINE__, szCmd);
 				return -1;
 			}
 

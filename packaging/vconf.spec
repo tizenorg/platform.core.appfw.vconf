@@ -60,6 +60,8 @@ ln -sf ../vconf-setup.service %{buildroot}%{_unitdir}/basic.target.wants/
 
 %post
 /sbin/ldconfig
+chsmack -a User %{TZ_SYS_CONFIG}
+chsmack -a User %{TZ_SYS_CONFIG}/db
 systemctl daemon-reload
 
 %postun
@@ -75,7 +77,7 @@ systemctl daemon-reload
 %{_bindir}/vconf-init
 %config(missingok) %attr(644,root,root) %{TZ_SYS_CONFIG}/kdb_first_boot
 %{_libdir}/*.so.*
-%dir %attr(777,root,root) %{TZ_SYS_CONFIG}/db
+%dir %attr(777,root,%TZ_SYS_USER_GROUP) %{TZ_SYS_CONFIG}/db
 %dir %attr(777,root,root) %{TZ_SYS_CONFIG}/db/.backup
 %{_unitdir}/basic.target.wants/vconf-setup.service
 %{_unitdir}/vconf-setup.service
