@@ -1,0 +1,7 @@
+Code-Review+2: Casey Schaufler <casey.schaufler@intel.com>
+Verified+1: Jean-Benoit MARTIN <jean-benoit.martin@open.eurogiciel.org>
+Submitted-by: Casey Schaufler <casey.schaufler@intel.com>
+Submitted-at: Thu, 22 May 2014 09:09:44 -0700
+Reviewed-on: https://review.tizen.org/gerrit/20283
+Project: platform/core/appfw/vconf
+Branch: refs/heads/tizen
