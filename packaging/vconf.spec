@@ -40,7 +40,6 @@ Vconf key management header files
 
 %prep
 %setup -q -n %{name}-%{version}
-sed -i 's|TZ_SYS_CONFIG|%{TZ_SYS_CONFIG}|g' %{SOURCE1001}
 cp %{SOURCE1001} .
 
 %build
@@ -62,6 +61,9 @@ ln -sf ../vconf-setup.service %{buildroot}%{_unitdir}/basic.target.wants/
 %post
 /sbin/ldconfig
 systemctl daemon-reload
+chsmack -a 'User' %{TZ_SYS_CONFIG}
+chsmack -a 'User' %{TZ_SYS_CONFIG}/db
+chsmack -a 'User' %{TZ_SYS_CONFIG}/db/.backup
 
 %postun
 /sbin/ldconfig
