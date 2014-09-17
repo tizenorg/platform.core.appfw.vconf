@@ -53,7 +53,7 @@ const char *BACKEND_DB_PREFIX = "db/";
 const char *BACKEND_FILE_PREFIX = "file/";
 const char *BACKEND_MEMORY_PREFIX = "memory/";
 
-const char *MEMORY_PREFIX = "/var/run";
+const char *MEMORY_PREFIX = tzplatform_getenv(TZ_SYS_RUN);
 
 static char *guid = NULL;
 static char *uid = NULL;

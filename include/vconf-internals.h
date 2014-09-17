@@ -39,7 +39,7 @@
 #define BACKEND_MEMORY_PREFIX "memory/"
 
 #define BACKEND_SYSTEM_DIR tzplatform_getenv(TZ_SYS_CONFIG)
-#define BACKEND_MEMORY_DIR "/var/run/"
+#define BACKEND_MEMORY_DIR tzplatform_getenv(TZ_SYS_RUN)
 
 /* This value can be optimized according to the device characteristcs and file system configuration */
 #define FILE_ATOMIC_GUARANTEE_SIZE 	4096
