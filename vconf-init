@@ -2,10 +2,10 @@
 
 source /etc/tizen-platform.conf
 
-mkdir /var/run/memory
-chmod 777 /var/run/memory
+mkdir -p ${TZ_SYS_RUN}/memory
+chmod 777 ${TZ_SYS_RUN}/memory
 
 set -e
 
 
-cp -a ${TZ_SYS_CONFIG}/memory_init/memory/* /var/run/memory
+cp -a ${TZ_SYS_CONFIG}/memory_init/memory/* ${TZ_SYS_RUN}/memory

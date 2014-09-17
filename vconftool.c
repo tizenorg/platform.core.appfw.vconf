@@ -53,8 +53,6 @@ const char *BACKEND_DB_PREFIX = "db/";
 const char *BACKEND_FILE_PREFIX = "file/";
 const char *BACKEND_MEMORY_PREFIX = "memory/";
 
-const char *MEMORY_PREFIX = "/var/run";
-
 static char *guid = NULL;
 static char *uid = NULL;
 static char *vconf_type = NULL;
@@ -364,7 +362,7 @@ static int make_file_path(char *pszKey, char *pszBuf)
 	} else if (0 ==
 		   strncmp(pszKey, BACKEND_MEMORY_PREFIX,
 			   strlen(BACKEND_MEMORY_PREFIX))) {
-		snprintf(pszBuf, BUFSIZE, "%s/%s", MEMORY_PREFIX, pszKey);
+		snprintf(pszBuf, BUFSIZE, "%s/%s", tzplatform_getenv(TZ_SYS_RUN), pszKey);
 		return 0;
 	}
 	return -1;
