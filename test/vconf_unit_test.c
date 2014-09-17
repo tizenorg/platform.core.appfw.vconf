@@ -196,7 +196,7 @@ void unset_operation(int i)
 }
 
 const char *test_dir[5]={
-   "/opt/var/kdb/db/unittest", "/opt/var/kdb/file/unittest", "/var/run/memory/unittest",
+   "/opt/var/kdb/db/unittest", "/opt/var/kdb/file/unittest", tzplatform_mkpath3(TZ_SYS_CONFIG,"memory","unittest"),
    "/opt/var/gconf/local/unittest", "/opt/var/gconf/unittest"};
 
 void recursive_unset_operation(void)
