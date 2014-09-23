@@ -605,9 +605,9 @@ int _vconf_get_key_prefix(const char *keyname, int *prefix)
 int _vconf_get_key_path(const char *keyname, char *path)
 {
 	if (strncmp(keyname, BACKEND_DB_PREFIX, strlen(BACKEND_DB_PREFIX)) == 0) {
-		snprintf(path, VCONF_KEY_PATH_LEN, "%s%s", BACKEND_SYSTEM_DIR, keyname);
+		snprintf(path, VCONF_KEY_PATH_LEN, "%s/%s", BACKEND_SYSTEM_DIR, keyname);
 	} else if (0 == strncmp(keyname, BACKEND_FILE_PREFIX, strlen(BACKEND_FILE_PREFIX))) {
-		snprintf(path, VCONF_KEY_PATH_LEN, "%s%s", BACKEND_SYSTEM_DIR, keyname);
+		snprintf(path, VCONF_KEY_PATH_LEN, "%s/%s", BACKEND_SYSTEM_DIR, keyname);
 	} else if (0 == strncmp(keyname, BACKEND_MEMORY_PREFIX, strlen(BACKEND_MEMORY_PREFIX))) {
 		snprintf(path, VCONF_KEY_PATH_LEN, "%s%s", BACKEND_MEMORY_DIR, keyname);
 	} else {
@@ -631,7 +631,7 @@ int _vconf_get_backup_path(const char *keyname, char *path)
 			key_buf[i] = keyname[i];
 	}
 
-	snprintf(path, VCONF_KEY_PATH_LEN, "%s%s%s%s", BACKEND_SYSTEM_DIR, BACKEND_DB_PREFIX, ".backup/", key_buf);
+	snprintf(path, VCONF_KEY_PATH_LEN, "%s/%s%s%s", BACKEND_SYSTEM_DIR, BACKEND_DB_PREFIX, ".backup/", key_buf);
 
 	return VCONF_OK;
 }
