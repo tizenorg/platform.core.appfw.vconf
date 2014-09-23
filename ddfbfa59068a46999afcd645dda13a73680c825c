@@ -1,0 +1,8 @@
+Code-Review+2: Casey Schaufler <casey.schaufler@intel.com>
+Code-Review+1: John Whiteman <john.l.whiteman@intel.com>
+Verified+1: John Whiteman <john.l.whiteman@intel.com>
+Submitted-by: Casey Schaufler <casey.schaufler@intel.com>
+Submitted-at: Tue, 23 Sep 2014 15:15:10 -0700
+Reviewed-on: https://review.tizen.org/gerrit/27979
+Project: platform/core/appfw/vconf
+Branch: refs/heads/tizen
