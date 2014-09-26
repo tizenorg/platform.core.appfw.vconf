@@ -1,5 +1,5 @@
 #!/bin/sh
-
+PATH="${PATH}:/bin"
 source /etc/tizen-platform.conf
 
 mkdir -p ${TZ_SYS_RUN}/memory
