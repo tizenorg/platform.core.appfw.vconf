@@ -8,6 +8,7 @@ Source0:    %{name}-%{version}.tar.gz
 Source1:    vconf-setup.service
 Source2:    vconf-setup.conf
 Source1001: 	vconf.manifest
+Requires:	util-linux
 Requires(post): /sbin/ldconfig, systemd
 Requires(postun): /sbin/ldconfig, systemd
 BuildRequires:  cmake
